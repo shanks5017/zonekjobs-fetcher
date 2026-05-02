@@ -1,0 +1,14 @@
+{
+  "name": "zonekjobs-fetcher",
+  "version": "1.0.0",
+  "type": "module",
+  "scripts": {
+    "fetch:openjobs": "node openjobs/run.mjs",
+    "fetch:openpostings": "node openpostings/run.mjs"
+  },
+  "dependencies": {
+    "@supabase/supabase-js": "^2.39.0",
+    "node-fetch": "^3.3.2",
+    "playwright": "^1.40.0"
+  }
+}
