@@ -205,8 +205,8 @@ async function main() {
     process.exit(1)
   }
 
-  const targets = companies.filter(isIndiaRelevant)
-  console.log(`Found ${targets.length} India-relevant companies out of ${companies.length} total`)
+  const targets = companies
+  console.log(`Processing all ${targets.length} global companies`)
 
   let totalJobs = 0
   let processed = 0
@@ -235,6 +235,11 @@ async function main() {
       else if (provider === 'ashby')  jobs = await fetchAshby(token)
       else if (provider === 'workday') jobs = await fetchWorkday(url, company.name)
 
+      // Format countries array into a single capitalized string (e.g. "United states, Canada")
+      const countryVal = company.countries && company.countries.length > 0
+        ? company.countries.map(c => c.charAt(0).toUpperCase() + c.slice(1).toLowerCase()).join(', ')
+        : 'Global';
+
       if (!jobs.length) {
         // Rule 6: The "Empty Company" Rule
         // If we found zero jobs, we still need the companyId to clean up old jobs
@@ -249,7 +254,7 @@ async function main() {
           slug,
           website: company.website || null,
           industry: company.industry_category || company.industry || null,
-          country: 'India',
+          country: countryVal,
           atsProvider: provider,
           atsToken: token,
           atsUrl: url,
@@ -275,7 +280,7 @@ async function main() {
         slug,
         website: company.website || null,
         industry: company.industry_category || company.industry || null,
-        country: 'India',
+        country: countryVal,
         atsProvider: provider,
         atsToken: token,
         atsUrl: url,
