@@ -7,7 +7,7 @@
  */
 
 import { readFileSync } from 'fs'
-import { upsertCompany, upsertJobs, expireOldJobs, logRun } from '../shared/supabase.mjs'
+import { upsertCompany, upsertJobs, cleanupMissingJobs, expireOldJobs, logRun } from '../shared/supabase.mjs'
 
 // ─── ATS FETCH HELPERS ────────────────────────────────────────────────────────
 
@@ -236,6 +236,30 @@ async function main() {
       else if (provider === 'workday') jobs = await fetchWorkday(url, company.name)
 
       if (!jobs.length) {
+        // Rule 6: The "Empty Company" Rule
+        // If we found zero jobs, we still need the companyId to clean up old jobs
+        const slug = company.name
+          .toLowerCase()
+          .replace(/[^a-z0-9]/g, '-')
+          .replace(/-+/g, '-')
+          .replace(/^-|-$/g, '')
+          
+        const companyId = await upsertCompany({
+          name: company.name,
+          slug,
+          website: company.website || null,
+          industry: company.industry_category || company.industry || null,
+          country: 'India',
+          atsProvider: provider,
+          atsToken: token,
+          atsUrl: url,
+          source: 'openjobs'
+        })
+        
+        if (companyId) {
+          await cleanupMissingJobs(companyId, [])
+        }
+        
         processed++
         continue
       }
@@ -266,6 +290,11 @@ async function main() {
       const jobsWithCompany = jobs.map((j) => ({ ...j, company_id: companyId }))
       const count = await upsertJobs(jobsWithCompany)
       totalJobs += count
+
+      // Rule 6: Cleanup Missing Jobs
+      const currentIds = jobs.map(j => j.external_id)
+      await cleanupMissingJobs(companyId, currentIds)
+
       processed++
 
       // Be polite to ATS APIs — 300ms between requests

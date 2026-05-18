@@ -6,7 +6,8 @@
  * Focuses on companies NOT typically covered by OpenJobs.
  */
 
-import { upsertCompany, upsertJobs, expireOldJobs, logRun } from '../shared/supabase.mjs'
+import { chromium } from 'playwright'
+import { upsertCompany, upsertJobs, cleanupMissingJobs, expireOldJobs, logRun } from '../shared/supabase.mjs'
 
 // ─── ATS FETCH HELPERS ────────────────────────────────────────────────────────
 
@@ -97,9 +98,21 @@ async function fetchAshby(token) {
   }
 }
 
-async function fetchWorkday(subdomain) {
+async function fetchWorkday(token, companyName) {
   try {
-    const apiUrl = `https://${subdomain}.wd5.myworkdayjobs.com/wday/cxs/${subdomain}/External/jobs`
+    // Some tokens might be full URLs, some just subdomains
+    let subdomain = token
+    let wd = 'wd5' // default
+
+    if (token.includes('myworkdayjobs.com')) {
+      const match = token.match(/https?:\/\/([^.]+)\.([^.]+)\.myworkdayjobs\.com/)
+      if (match) {
+        subdomain = match[1]
+        wd = match[2]
+      }
+    }
+
+    const apiUrl = `https://${subdomain}.${wd}.myworkdayjobs.com/wday/cxs/${subdomain}/External/jobs`
     const res = await fetch(apiUrl, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -113,7 +126,7 @@ async function fetchWorkday(subdomain) {
       title: job.title,
       location: job.locationsText || 'India',
       is_remote: false,
-      apply_url: `https://${subdomain}.wd5.myworkdayjobs.com${job.externalPath}`,
+      apply_url: `https://${subdomain}.${wd}.myworkdayjobs.com${job.externalPath}`,
       ats_provider: 'workday',
       job_type: 'fulltime',
       department: null,
@@ -123,69 +136,162 @@ async function fetchWorkday(subdomain) {
       source_repo: 'openpostings'
     }))
   } catch (err) {
-    console.error(`  ✗ Workday [${subdomain}]:`, err.message)
+    console.error(`  ✗ Workday [${companyName || token}]:`, err.message)
     return []
   }
 }
 
-// ─── CURATED INDIAN COMPANY LIST (from OpenPostings 78k DB) ──────────────────
-// These are verified working ATS tokens for Indian tech/startup companies.
-// Add more entries here as you discover them from the OpenPostings DB.
+// ─── SMARTRECRUITERS FETCH HELPER ────────────────────────────────────────────
+async function fetchSmartRecruiters(token) {
+  try {
+    let allJobs = []
+    let offset = 0
+    const limit = 100
+    while (true) {
+      const url = `https://api.smartrecruiters.com/v1/companies/${token}/postings?limit=${limit}&offset=${offset}`
+      const res = await fetch(url)
+      if (!res.ok) break
+      const data = await res.json()
+      const batch = (data.content || [])
+      allJobs = allJobs.concat(batch.map((job) => ({
+        external_id: job.id,
+        title: job.name,
+        location: job.location?.city
+          ? `${job.location.city}, ${job.location.country || 'India'}`
+          : (job.location?.remote ? 'Remote' : 'India'),
+        is_remote: job.location?.remote || false,
+        apply_url: `https://careers.smartrecruiters.com/${token}/${job.id}`,
+        ats_provider: 'smartrecruiters',
+        job_type: job.typeOfEmployment?.id === 'PART_TIME' ? 'parttime' : 'fulltime',
+        department: job.department?.label || null,
+        posted_at: job.releasedDate || new Date().toISOString(),
+        fetched_at: new Date().toISOString(),
+        is_active: true,
+        source_repo: 'openpostings'
+      })))
+      if (batch.length < limit) break
+      offset += limit
+    }
+    return allJobs
+  } catch (err) {
+    console.error(`  ✗ SmartRecruiters [${token}]:`, err.message)
+    return []
+  }
+}
+
+// ─── PLAYWRIGHT WORKDAY FETCH (handles CSRF automatically) ────────────────────
+async function fetchWorkdayPlaywright(subdomain, wd = 'wd5', jobBoardPath = 'External') {
+  const browser = await chromium.launch({ headless: true })
+  try {
+    const context = await browser.newContext({
+      userAgent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
+    })
+    const page = await context.newPage()
+
+    // Set up response interception BEFORE navigating
+    let jobsData = null
+    page.on('response', async (response) => {
+      if (response.url().includes('/jobs') && response.request().method() === 'POST') {
+        try {
+          const body = await response.json()
+          if (body.jobPostings) jobsData = body
+        } catch {}
+      }
+    })
+
+    const baseUrl = `https://${subdomain}.${wd}.myworkdayjobs.com/${jobBoardPath}`
+    await page.goto(baseUrl, { waitUntil: 'networkidle', timeout: 30000 })
+
+    // Detect maintenance page
+    const pageTitle = await page.title()
+    if (pageTitle.toLowerCase().includes('unavailable') || pageTitle.toLowerCase().includes('maintenance')) {
+      console.log(`  ⚠ Workday [${subdomain}]: system under maintenance, skipping`)
+      return []
+    }
+
+    // Wait for jobs to load on page
+    await page.waitForSelector('[data-automation-id="jobTitle"]', { timeout: 15000 }).catch(() => {})
+    await new Promise(r => setTimeout(r, 2000))
+
+    if (!jobsData) {
+      // Try direct API call using CSRF token from cookies
+      const cookies = await context.cookies()
+      const csrfCookie = cookies.find(c => c.name.toLowerCase().includes('csrf') || c.name.toLowerCase().includes('xsrf'))
+      const apiUrl = `https://${subdomain}.${wd}.myworkdayjobs.com/wday/cxs/${subdomain}/${jobBoardPath}/jobs`
+      const headers = { 'Content-Type': 'application/json' }
+      if (csrfCookie) headers['X-Calypso-CSRF-Token'] = csrfCookie.value
+
+      try {
+        const response = await page.evaluate(async ({ url, hdrs }) => {
+          const res = await fetch(url, {
+            method: 'POST',
+            headers: hdrs,
+            body: JSON.stringify({ appliedFacets: {}, limit: 20, offset: 0, searchText: '' })
+          })
+          return res.ok ? await res.json() : null
+        }, { url: apiUrl, hdrs: headers })
+        jobsData = response
+      } catch (evalErr) {
+        console.log(`  ⚠ Workday [${subdomain}]: page.evaluate failed — ${evalErr.message.split('\n')[0]}`)
+      }
+    }
+
+    if (!jobsData?.jobPostings) return []
+
+    return jobsData.jobPostings.map((job) => ({
+      external_id: job.bulletFields?.[0] || `${subdomain}-${job.title}`.replace(/\s+/g, '-'),
+      title: job.title,
+      location: job.locationsText || 'India',
+      is_remote: false,
+      apply_url: `https://${subdomain}.${wd}.myworkdayjobs.com${job.externalPath}`,
+      ats_provider: 'workday',
+      job_type: 'fulltime',
+      department: null,
+      posted_at: new Date().toISOString(),
+      fetched_at: new Date().toISOString(),
+      is_active: true,
+      source_repo: 'openpostings'
+    }))
+
+  } catch (err) {
+    console.error(`  ✗ Workday Playwright [${subdomain}]:`, err.message)
+    return []
+  } finally {
+    await browser.close()
+  }
+}
+
+// ─── CURATED INDIAN COMPANY LIST ─────────────────────────────────────────────
+// ✅ Verified working. Each entry lists ATS provider and token.
+// 🎭 Playwright entries use browser automation — slower but reliable.
 
 const INDIAN_COMPANIES = [
-  // ── Greenhouse ─────────────────────────────────────────────────────────────
-  { name: 'Swiggy',          atsProvider: 'greenhouse', atsToken: 'swiggy' },
-  { name: 'CRED',            atsProvider: 'greenhouse', atsToken: 'cred' },
-  { name: 'Meesho',          atsProvider: 'greenhouse', atsToken: 'meesho' },
-  { name: 'Razorpay',        atsProvider: 'greenhouse', atsToken: 'razorpay' },
-  { name: 'BrowserStack',    atsProvider: 'greenhouse', atsToken: 'browserstack' },
-  { name: 'Postman',         atsProvider: 'greenhouse', atsToken: 'postman' },
-  { name: 'Freshworks',      atsProvider: 'greenhouse', atsToken: 'freshworks' },
-  { name: 'Chargebee',       atsProvider: 'greenhouse', atsToken: 'chargebee' },
-  { name: 'Hasura',          atsProvider: 'greenhouse', atsToken: 'hasura' },
-  { name: 'Setu',            atsProvider: 'greenhouse', atsToken: 'setu' },
-  { name: 'Darwinbox',       atsProvider: 'greenhouse', atsToken: 'darwinbox' },
-  { name: 'Unacademy',       atsProvider: 'greenhouse', atsToken: 'unacademy' },
-  { name: 'Groww',           atsProvider: 'greenhouse', atsToken: 'groww' },
-  { name: 'Niyo',            atsProvider: 'greenhouse', atsToken: 'niyo' },
-  { name: 'Slice',           atsProvider: 'greenhouse', atsToken: 'slice' },
-  { name: 'Jupiter',         atsProvider: 'greenhouse', atsToken: 'jupiter' },
-  { name: 'Setu',            atsProvider: 'greenhouse', atsToken: 'setu' },
-  { name: 'Zetwerk',         atsProvider: 'greenhouse', atsToken: 'zetwerk' },
-  { name: 'Innovaccer',      atsProvider: 'greenhouse', atsToken: 'innovaccer' },
-  { name: 'Spinny',          atsProvider: 'greenhouse', atsToken: 'spinny' },
+  // ── Greenhouse (verified ✓) ──────────────────────────────────────────────────
+  { name: 'Razorpay',        website: 'razorpay.com', atsProvider: 'greenhouse',       atsToken: 'razorpaysoftwareprivatelimited' },
+  { name: 'Postman',         website: 'postman.com', atsProvider: 'greenhouse',       atsToken: 'postman' },
+  { name: 'Groww',           website: 'groww.in', atsProvider: 'greenhouse',       atsToken: 'groww' },
+  { name: 'Slice',           website: 'sliceit.com', atsProvider: 'greenhouse',       atsToken: 'slice' },
+  { name: 'PhonePe',         website: 'phonepe.com', atsProvider: 'greenhouse',       atsToken: 'phonepe' },
+  { name: 'InMobi',          website: 'inmobi.com', atsProvider: 'greenhouse',       atsToken: 'inmobi' },
 
-  // ── Lever ──────────────────────────────────────────────────────────────────
-  { name: 'PhonePe',         atsProvider: 'lever', atsToken: 'phonepe' },
-  { name: 'Nykaa',           atsProvider: 'lever', atsToken: 'nykaa' },
-  { name: 'ShareChat',       atsProvider: 'lever', atsToken: 'sharechat' },
-  { name: 'InMobi',          atsProvider: 'lever', atsToken: 'inmobi' },
-  { name: 'Delhivery',       atsProvider: 'lever', atsToken: 'delhivery' },
-  { name: 'Urban Company',   atsProvider: 'lever', atsToken: 'urbancompany' },
-  { name: 'Vedantu',         atsProvider: 'lever', atsToken: 'vedantu' },
-  { name: 'Zepto',           atsProvider: 'lever', atsToken: 'zepto' },
-  { name: 'Licious',         atsProvider: 'lever', atsToken: 'licious' },
-  { name: 'Mensa Brands',    atsProvider: 'lever', atsToken: 'mensabrands' },
-  { name: 'Moglix',          atsProvider: 'lever', atsToken: 'moglix' },
-  { name: 'Fareye',          atsProvider: 'lever', atsToken: 'fareye' },
+  // ── Lever (verified ✓) ──────────────────────────────────────────────────────
+  { name: 'Meesho',          website: 'meesho.com', atsProvider: 'lever',            atsToken: 'meesho' },
+  { name: 'CRED',            website: 'cred.club', atsProvider: 'lever',            atsToken: 'cred' },
 
-  // ── Ashby ──────────────────────────────────────────────────────────────────
-  { name: 'Spendflo',        atsProvider: 'ashby', atsToken: 'spendflo' },
-  { name: 'Zluri',           atsProvider: 'ashby', atsToken: 'zluri' },
-  { name: 'Multiplier',      atsProvider: 'ashby', atsToken: 'multiplier' },
-  { name: 'Keka HR',         atsProvider: 'ashby', atsToken: 'keka' },
-  { name: 'LeadSquared',     atsProvider: 'ashby', atsToken: 'leadsquared' },
-  { name: 'Pepper Content',  atsProvider: 'ashby', atsToken: 'peppercontent' },
-  { name: 'Plum',            atsProvider: 'ashby', atsToken: 'plumhq' },
-  { name: 'Volopay',         atsProvider: 'ashby', atsToken: 'volopay' },
-  { name: 'Recko',           atsProvider: 'ashby', atsToken: 'recko' },
+  // ── Ashby (verified ✓) ──────────────────────────────────────────────────────
+  { name: 'Volopay',         website: 'volopay.com', atsProvider: 'ashby',            atsToken: 'volopay' },
 
-  // ── Workday (subdomain only, not full URL) ─────────────────────────────────
-  { name: 'Wipro',           atsProvider: 'workday', atsToken: 'wipro' },
-  { name: 'HCL Technologies',atsProvider: 'workday', atsToken: 'hcl' },
-  { name: 'Tech Mahindra',   atsProvider: 'workday', atsToken: 'techmahindra' },
-  { name: 'Infosys',         atsProvider: 'workday', atsToken: 'infosys' },
-  { name: 'Cognizant',       atsProvider: 'workday', atsToken: 'cognizant' },
+  // ── SmartRecruiters (verified ✓) ────────────────────────────────────────────
+  { name: 'Freshworks',      website: 'freshworks.com', atsProvider: 'smartrecruiters',  atsToken: 'Freshworks' },
+  { name: 'Unacademy',       website: 'unacademy.com', atsProvider: 'smartrecruiters',  atsToken: 'Unacademy' },
+
+  // ── Workday via Playwright 🎭 (browser-automated) ────────────────────────────
+  { name: 'Wipro',           website: 'wipro.com', atsProvider: 'workday-playwright', atsToken: 'wipro',         wd: 'wd5', jobBoard: 'External' },
+  { name: 'HCL Technologies',website: 'hcltech.com', atsProvider: 'workday-playwright', atsToken: 'hcl',           wd: 'wd5', jobBoard: 'External' },
+  { name: 'Tech Mahindra',   website: 'techmahindra.com', atsProvider: 'workday-playwright', atsToken: 'techmahindra',  wd: 'wd5', jobBoard: 'External' },
+  { name: 'Infosys',         website: 'infosys.com', atsProvider: 'workday-playwright', atsToken: 'infosys',       wd: 'wd5', jobBoard: 'External' },
+  { name: 'Cognizant',       website: 'cognizant.com', atsProvider: 'workday-playwright', atsToken: 'cognizant',     wd: 'wd5', jobBoard: 'External' },
+  { name: 'Swiggy',          website: 'swiggy.com', atsProvider: 'workday-playwright', atsToken: 'swiggy',        wd: 'wd3', jobBoard: 'Swiggy' },
 ]
 
 // ─── MAIN ─────────────────────────────────────────────────────────────────────
@@ -207,11 +313,38 @@ async function main() {
       } else if (company.atsProvider === 'ashby') {
         jobs = await fetchAshby(company.atsToken)
       } else if (company.atsProvider === 'workday') {
-        jobs = await fetchWorkday(company.atsToken)
+        jobs = await fetchWorkday(company.atsToken, company.name)
+      } else if (company.atsProvider === 'smartrecruiters') {
+        jobs = await fetchSmartRecruiters(company.atsToken)
+      } else if (company.atsProvider === 'workday-playwright') {
+        jobs = await fetchWorkdayPlaywright(company.atsToken, company.wd || 'wd5', company.jobBoard || 'External')
       }
 
       if (!jobs.length) {
         console.log(`  - ${company.name}: no jobs found`)
+        
+        // Rule 6: Cleanup Missing Jobs (Empty Company Rule)
+        const slug = company.name
+          .toLowerCase()
+          .replace(/[^a-z0-9]/g, '-')
+          .replace(/-+/g, '-')
+          .replace(/^-|-$/g, '')
+
+        const companyId = await upsertCompany({
+          name: company.name,
+          slug,
+          website: company.website || null,
+          industry: company.industry || null,
+          country: 'India',
+          atsProvider: company.atsProvider,
+          atsToken: company.atsToken,
+          atsUrl: company.atsUrl || null,
+          source: 'openpostings'
+        })
+        
+        if (companyId) {
+          await cleanupMissingJobs(companyId, [])
+        }
         continue
       }
 
@@ -240,6 +373,10 @@ async function main() {
       totalJobs += count
 
       console.log(`  ✓ ${company.name}: ${count} jobs`)
+
+      // Rule 6: Cleanup Missing Jobs (Stay Alive Rule)
+      const currentIds = jobs.map(j => j.external_id)
+      await cleanupMissingJobs(companyId, currentIds)
 
       // Rate limiting — 400ms between requests
       await new Promise((r) => setTimeout(r, 400))

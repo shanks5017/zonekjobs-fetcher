@@ -3,12 +3,17 @@
   "version": "1.0.0",
   "type": "module",
   "scripts": {
-    "fetch:openjobs": "node openjobs/run.mjs",
-    "fetch:openpostings": "node openpostings/run.mjs"
+    "fetch:openjobs": "node --env-file=.env openjobs/run.mjs",
+    "fetch:openpostings": "node --env-file=.env openpostings/run.mjs",
+    "fetch:all": "concurrently \"npm run fetch:openjobs\" \"npm run fetch:openpostings\"",
+    "test:connection": "node --env-file=.env shared/test-connection.mjs"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.39.0",
     "node-fetch": "^3.3.2",
     "playwright": "^1.40.0"
+  },
+  "devDependencies": {
+    "concurrently": "^9.2.1"
   }
 }
