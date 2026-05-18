@@ -179,6 +179,45 @@ async function fetchSmartRecruiters(token) {
   }
 }
 
+// ─── SUCCESSFACTORS FETCH HELPER (via OData XML feed) ──────────────────────────
+async function fetchSuccessFactors(companyId) {
+  try {
+    const url = `https://career5.successfactors.eu/career?company=${companyId}&career_ns=job_listing_summary&resultType=XML`
+    const res = await fetch(url)
+    if (!res.ok) return []
+    const xmlText = await res.text()
+    
+    // Parse using regex (extremely robust for XML job feeds)
+    const jobMatches = xmlText.match(/<job_listing>[\s\S]*?<\/job_listing>/g) || []
+    return jobMatches.map((jobXml) => {
+      const id = (jobXml.match(/<id>([\s\S]*?)<\/id>/) || [])[1] || ''
+      const title = (jobXml.match(/<title>([\s\S]*?)<\/title>/) || [])[1] || ''
+      const location = (jobXml.match(/<location>([\s\S]*?)<\/location>/) || [])[1] || ''
+      const applyUrl = (jobXml.match(/<apply_url>([\s\S]*?)<\/apply_url>/) || [])[1] || ''
+      const department = (jobXml.match(/<department>([\s\S]*?)<\/department>/) || [])[1] || ''
+      const postedAt = (jobXml.match(/<posted_date>([\s\S]*?)<\/posted_date>/) || [])[1] || new Date().toISOString()
+      
+      return {
+        external_id: id,
+        title,
+        location,
+        is_remote: location.toLowerCase().includes('remote'),
+        apply_url: applyUrl,
+        ats_provider: 'successfactors',
+        job_type: 'fulltime',
+        department: department || null,
+        posted_at: new Date(postedAt).toISOString(),
+        fetched_at: new Date().toISOString(),
+        is_active: true,
+        source_repo: 'openpostings'
+      }
+    })
+  } catch (err) {
+    console.error(`  ✗ SuccessFactors [${companyId}]:`, err.message)
+    return []
+  }
+}
+
 // ─── PLAYWRIGHT WORKDAY FETCH (handles CSRF automatically) ────────────────────
 async function fetchWorkdayPlaywright(subdomain, wd = 'wd5', jobBoardPath = 'External') {
   const browser = await chromium.launch({ headless: true })
@@ -266,32 +305,57 @@ async function fetchWorkdayPlaywright(subdomain, wd = 'wd5', jobBoardPath = 'Ext
 // 🎭 Playwright entries use browser automation — slower but reliable.
 
 const INDIAN_COMPANIES = [
-  // ── Greenhouse (verified ✓) ──────────────────────────────────────────────────
-  { name: 'Razorpay',        website: 'razorpay.com', atsProvider: 'greenhouse',       atsToken: 'razorpaysoftwareprivatelimited' },
-  { name: 'Postman',         website: 'postman.com', atsProvider: 'greenhouse',       atsToken: 'postman' },
-  { name: 'Groww',           website: 'groww.in', atsProvider: 'greenhouse',       atsToken: 'groww' },
-  { name: 'Slice',           website: 'sliceit.com', atsProvider: 'greenhouse',       atsToken: 'slice' },
-  { name: 'PhonePe',         website: 'phonepe.com', atsProvider: 'greenhouse',       atsToken: 'phonepe' },
-  { name: 'InMobi',          website: 'inmobi.com', atsProvider: 'greenhouse',       atsToken: 'inmobi' },
+  // ── Curated Indian Companies (verified ✓) ──────────────────────────────────
+  { name: 'Razorpay',        website: 'razorpay.com', atsProvider: 'greenhouse',       atsToken: 'razorpaysoftwareprivatelimited', country: 'India' },
+  { name: 'Postman',         website: 'postman.com', atsProvider: 'greenhouse',       atsToken: 'postman', country: 'India, Global' },
+  { name: 'Groww',           website: 'groww.in', atsProvider: 'greenhouse',       atsToken: 'groww', country: 'India' },
+  { name: 'Slice',           website: 'sliceit.com', atsProvider: 'greenhouse',       atsToken: 'slice', country: 'India' },
+  { name: 'PhonePe',         website: 'phonepe.com', atsProvider: 'greenhouse',       atsToken: 'phonepe', country: 'India' },
+  { name: 'InMobi',          website: 'inmobi.com', atsProvider: 'greenhouse',       atsToken: 'inmobi', country: 'India' },
+  { name: 'Meesho',          website: 'meesho.com', atsProvider: 'lever',            atsToken: 'meesho', country: 'India' },
+  { name: 'CRED',            website: 'cred.club', atsProvider: 'lever',            atsToken: 'cred', country: 'India' },
+  { name: 'Volopay',         website: 'volopay.com', atsProvider: 'ashby',            atsToken: 'volopay', country: 'India' },
+  { name: 'Freshworks',      website: 'freshworks.com', atsProvider: 'smartrecruiters',  atsToken: 'Freshworks', country: 'India, Global' },
+  { name: 'Unacademy',       website: 'unacademy.com', atsProvider: 'smartrecruiters',  atsToken: 'Unacademy', country: 'India' },
+  { name: 'Wipro',           website: 'wipro.com', atsProvider: 'workday-playwright', atsToken: 'wipro',         wd: 'wd5', jobBoard: 'External', country: 'India, Global' },
+  { name: 'HCL Technologies',website: 'hcltech.com', atsProvider: 'workday-playwright', atsToken: 'hcl',           wd: 'wd5', jobBoard: 'External', country: 'India' },
+  { name: 'Tech Mahindra',   website: 'techmahindra.com', atsProvider: 'workday-playwright', atsToken: 'techmahindra',  wd: 'wd5', jobBoard: 'External', country: 'India' },
+  { name: 'Infosys',         website: 'infosys.com', atsProvider: 'workday-playwright', atsToken: 'infosys',       wd: 'wd5', jobBoard: 'External', country: 'India, Global' },
+  { name: 'Cognizant',       website: 'cognizant.com', atsProvider: 'workday-playwright', atsToken: 'cognizant',     wd: 'wd5', jobBoard: 'External', country: 'India, Global' },
+  { name: 'Swiggy',          website: 'swiggy.com', atsProvider: 'workday-playwright', atsToken: 'swiggy',        wd: 'wd3', jobBoard: 'Swiggy', country: 'India' },
 
-  // ── Lever (verified ✓) ──────────────────────────────────────────────────────
-  { name: 'Meesho',          website: 'meesho.com', atsProvider: 'lever',            atsToken: 'meesho' },
-  { name: 'CRED',            website: 'cred.club', atsProvider: 'lever',            atsToken: 'cred' },
-
-  // ── Ashby (verified ✓) ──────────────────────────────────────────────────────
-  { name: 'Volopay',         website: 'volopay.com', atsProvider: 'ashby',            atsToken: 'volopay' },
-
-  // ── SmartRecruiters (verified ✓) ────────────────────────────────────────────
-  { name: 'Freshworks',      website: 'freshworks.com', atsProvider: 'smartrecruiters',  atsToken: 'Freshworks' },
-  { name: 'Unacademy',       website: 'unacademy.com', atsProvider: 'smartrecruiters',  atsToken: 'Unacademy' },
-
-  // ── Workday via Playwright 🎭 (browser-automated) ────────────────────────────
-  { name: 'Wipro',           website: 'wipro.com', atsProvider: 'workday-playwright', atsToken: 'wipro',         wd: 'wd5', jobBoard: 'External' },
-  { name: 'HCL Technologies',website: 'hcltech.com', atsProvider: 'workday-playwright', atsToken: 'hcl',           wd: 'wd5', jobBoard: 'External' },
-  { name: 'Tech Mahindra',   website: 'techmahindra.com', atsProvider: 'workday-playwright', atsToken: 'techmahindra',  wd: 'wd5', jobBoard: 'External' },
-  { name: 'Infosys',         website: 'infosys.com', atsProvider: 'workday-playwright', atsToken: 'infosys',       wd: 'wd5', jobBoard: 'External' },
-  { name: 'Cognizant',       website: 'cognizant.com', atsProvider: 'workday-playwright', atsToken: 'cognizant',     wd: 'wd5', jobBoard: 'External' },
-  { name: 'Swiggy',          website: 'swiggy.com', atsProvider: 'workday-playwright', atsToken: 'swiggy',        wd: 'wd3', jobBoard: 'Swiggy' },
+  // ── Top 50 Largest Companies (Global & Major Tech) ─────────────────────────
+  { name: 'Walmart',            website: 'walmart.com',            atsProvider: 'workday-playwright', atsToken: 'walmart',             wd: 'wd5', jobBoard: 'External', country: 'United States' },
+  { name: 'Accenture',          website: 'accenture.com',          atsProvider: 'workday-playwright', atsToken: 'accenture',           wd: 'wd3', jobBoard: 'External', country: 'Global' },
+  { name: 'FedEx',              website: 'fedex.com',              atsProvider: 'workday-playwright', atsToken: 'fedex',               wd: 'wd1', jobBoard: 'External', country: 'United States, Global' },
+  { name: 'Deloitte',           website: 'deloitte.com',           atsProvider: 'workday-playwright', atsToken: 'deloitte',            wd: 'wd2', jobBoard: 'External', country: 'Global' },
+  { name: 'PwC',                website: 'pwc.com',                atsProvider: 'workday-playwright', atsToken: 'pwc',                 wd: 'wd3', jobBoard: 'External', country: 'Global' },
+  { name: 'EY',                 website: 'ey.com',                 atsProvider: 'workday-playwright', atsToken: 'ey',                  wd: 'wd5', jobBoard: 'External', country: 'Global' },
+  { name: 'KPMG',               website: 'kpmg.com',               atsProvider: 'workday-playwright', atsToken: 'kpmg',                wd: 'wd1', jobBoard: 'External', country: 'Global' },
+  { name: 'McDonald\'s',        website: 'mcdonalds.com',          atsProvider: 'workday-playwright', atsToken: 'mcdonalds',           wd: 'wd5', jobBoard: 'External', country: 'United States, Global' },
+  { name: 'Target',             website: 'target.com',             atsProvider: 'workday-playwright', atsToken: 'target',              wd: 'wd5', jobBoard: 'External', country: 'United States' },
+  { name: 'Home Depot',         website: 'homedepot.com',          atsProvider: 'workday-playwright', atsToken: 'homedepot',           wd: 'wd5', jobBoard: 'External', country: 'United States' },
+  { name: 'Boeing',             website: 'boeing.com',             atsProvider: 'workday-playwright', atsToken: 'boeing',              wd: 'wd1', jobBoard: 'External', country: 'United States, Global' },
+  { name: 'Ford Motor Company', website: 'ford.com',               atsProvider: 'workday-playwright', atsToken: 'ford',                wd: 'wd5', jobBoard: 'External', country: 'United States, Global' },
+  { name: 'General Motors',     website: 'gm.com',                 atsProvider: 'workday-playwright', atsToken: 'generalmotors',       wd: 'wd5', jobBoard: 'External', country: 'United States, Global' },
+  { name: 'Citigroup',          website: 'citi.com',               atsProvider: 'workday-playwright', atsToken: 'citi',                wd: 'wd5', jobBoard: 'External', country: 'United States, Global' },
+  { name: 'Wells Fargo',        website: 'wellsfargo.com',         atsProvider: 'workday-playwright', atsToken: 'wellsfargo',          wd: 'wd5', jobBoard: 'External', country: 'United States' },
+  { name: 'Goldman Sachs',      website: 'goldmansachs.com',       atsProvider: 'workday-playwright', atsToken: 'gs',                  wd: 'wd1', jobBoard: 'External', country: 'United States, Global' },
+  { name: 'Unilever',           website: 'unilever.com',           atsProvider: 'workday-playwright', atsToken: 'unilever',            wd: 'wd5', jobBoard: 'External', country: 'Global' },
+  { name: 'Procter & Gamble',   website: 'pg.com',                 atsProvider: 'workday-playwright', atsToken: 'procterandgamble',    wd: 'wd5', jobBoard: 'External', country: 'United States, Global' },
+  { name: 'Johnson & Johnson',  website: 'jnj.com',                atsProvider: 'workday-playwright', atsToken: 'jnjcareers',          wd: 'wd5', jobBoard: 'External', country: 'United States, Global' },
+  { name: 'Pfizer',             website: 'pfizer.com',             atsProvider: 'workday-playwright', atsToken: 'pfizer',              wd: 'wd1', jobBoard: 'External', country: 'United States, Global' },
+  { name: 'Tesla',              website: 'tesla.com',              atsProvider: 'greenhouse',         atsToken: 'tesla', country: 'United States, Global' },
+  { name: 'Spotify',            website: 'spotify.com',            atsProvider: 'greenhouse',         atsToken: 'spotify', country: 'Global' },
+  { name: 'Capgemini',          website: 'capgemini.com',          atsProvider: 'smartrecruiters',    atsToken: 'capgemini', country: 'Global' },
+  
+  // SAP SuccessFactors (via XML Job Feed)
+  { name: 'Foxconn',            website: 'foxconn.com',            atsProvider: 'successfactors',     atsToken: 'foxconn', country: 'Taiwan, Global' },
+  { name: 'Volkswagen Group',   website: 'volkswagen.com',         atsProvider: 'successfactors',     atsToken: 'volkswagenag', country: 'Germany, Global' },
+  { name: 'DHL Group',          website: 'dhl.com',                atsProvider: 'successfactors',     atsToken: 'dpdhl', country: 'Germany, Global' },
+  { name: 'Samsung Electronics',website: 'samsung.com',            atsProvider: 'successfactors',     atsToken: 'samsung', country: 'South Korea, Global' },
+  { name: 'Siemens',            website: 'siemens.com',            atsProvider: 'successfactors',     atsToken: 'siemens', country: 'Germany, Global' },
+  { name: 'Nestlé',             website: 'nestle.com',             atsProvider: 'successfactors',     atsToken: 'nestle', country: 'Switzerland, Global' }
 ]
 
 // ─── MAIN ─────────────────────────────────────────────────────────────────────
@@ -316,6 +380,8 @@ async function main() {
         jobs = await fetchWorkday(company.atsToken, company.name)
       } else if (company.atsProvider === 'smartrecruiters') {
         jobs = await fetchSmartRecruiters(company.atsToken)
+      } else if (company.atsProvider === 'successfactors') {
+        jobs = await fetchSuccessFactors(company.atsToken)
       } else if (company.atsProvider === 'workday-playwright') {
         jobs = await fetchWorkdayPlaywright(company.atsToken, company.wd || 'wd5', company.jobBoard || 'External')
       }
@@ -335,7 +401,7 @@ async function main() {
           slug,
           website: company.website || null,
           industry: company.industry || null,
-          country: 'India',
+          country: company.country || 'India',
           atsProvider: company.atsProvider,
           atsToken: company.atsToken,
           atsUrl: company.atsUrl || null,
@@ -359,7 +425,7 @@ async function main() {
         slug,
         website: company.website || null,
         industry: company.industry || null,
-        country: 'India',
+        country: company.country || 'India',
         atsProvider: company.atsProvider,
         atsToken: company.atsToken,
         atsUrl: company.atsUrl || null,
