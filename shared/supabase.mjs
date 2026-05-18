@@ -18,16 +18,54 @@ export async function upsertCompany(company) {
     .replace(/^-|-$/g, '')
 
   let logo_url = null
+  let resolvedDomain = null
+
+  const ATS_DOMAINS = [
+    'greenhouse.io',
+    'lever.co',
+    'ashbyhq.com',
+    'myworkdayjobs.com',
+    'workdayjobs',
+    'workday.com',
+    'smartrecruiters.com',
+    'recruitee.com',
+    'bamboohr.com',
+    'breezy.hr'
+  ]
+
   if (company.website) {
     try {
       const urlStr = company.website.startsWith('http') ? company.website : `https://${company.website}`
       const url = new URL(urlStr)
-      const domain = url.hostname.replace('www.', '')
-      const testUrl = `https://www.google.com/s2/favicons?domain=${domain.toLowerCase()}&sz=128`
-      logo_url = testUrl
+      const hostname = url.hostname.replace('www.', '')
+      
+      // If website isn't an ATS portal, use it
+      const isAts = ATS_DOMAINS.some(d => hostname.toLowerCase().includes(d))
+      if (!isAts) {
+        resolvedDomain = hostname
+      }
     } catch (e) {
       // ignore
     }
+  }
+
+  // Fallback: If no valid domain was extracted from website, generate one from the name
+  if (!resolvedDomain && company.name) {
+    const cleanName = company.name
+      .toLowerCase()
+      .replace(/[^a-z0-9]/g, '')
+    resolvedDomain = `${cleanName}.com`
+  }
+
+  if (resolvedDomain) {
+    // Strip subdomains if present (e.g. jobs.meesho.com -> meesho.com)
+    const parts = resolvedDomain.split('.')
+    if (parts.length > 2) {
+      resolvedDomain = parts.slice(-2).join('.')
+    }
+    
+    // Primary: Clearbit premium logo, fallback handled gracefully by frontend onError
+    logo_url = `https://logo.clearbit.com/${resolvedDomain.toLowerCase()}?size=128`
   }
 
   const { data, error } = await supabase
