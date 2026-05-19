@@ -5,7 +5,14 @@
   "scripts": {
     "fetch:openjobs": "node --env-file=.env openjobs/run.mjs",
     "fetch:openpostings": "node --env-file=.env openpostings/run.mjs",
-    "fetch:all": "concurrently \"npm run fetch:openjobs\" \"npm run fetch:openpostings\"",
+    "fetch:jobhive": "node --env-file=.env jobhive-fetcher/run.mjs",
+    "fetch:jobhive:greenhouse": "node --env-file=.env jobhive-fetcher/run-full.mjs --ats greenhouse --concurrency 4 --resume",
+    "fetch:jobhive:lever": "node --env-file=.env jobhive-fetcher/run-full.mjs --ats lever --concurrency 4 --resume",
+    "fetch:jobhive:ashby": "node --env-file=.env jobhive-fetcher/run-full.mjs --ats ashby --concurrency 4 --resume",
+    "fetch:jobhive:smartrecruiters": "node --env-file=.env jobhive-fetcher/run-full.mjs --ats smartrecruiters --concurrency 4 --resume",
+    "fetch:jobhive:workday": "node --env-file=.env jobhive-fetcher/run-full.mjs --ats workday --concurrency 2 --resume",
+    "fetch:jobhive:all": "node --env-file=.env jobhive-fetcher/run-full.mjs --ats all --concurrency 4 --resume",
+    "fetch:all": "concurrently \"npm run fetch:openjobs\" \"npm run fetch:openpostings\" \"npm run fetch:jobhive\"",
     "test:connection": "node --env-file=.env shared/test-connection.mjs"
   },
   "dependencies": {

@@ -127,25 +127,54 @@ export async function upsertJobs(jobs) {
 export async function cleanupMissingJobs(companyId, currentExternalIds) {
   if (!companyId) return
 
-  // Rule 6: The "Stay Alive" & "Empty Company" Rules
-  // If currentExternalIds is empty, all jobs for this company will be removed.
-  // Otherwise, only those not in the current fetch are removed.
-  
-  let query = supabase
+  // Rule 6: The "Stay Alive" & "Empty Company" Rules.
+  // Supabase's NOT IN query string breaks for large companies (500+ jobs).
+  // Strategy: fetch all existing external_ids for this company, diff locally,
+  // then delete stale IDs in batches of 50 to stay well within URL limits.
+
+  const currentSet = new Set(currentExternalIds || [])
+
+  // Fetch all existing job IDs for this company
+  const { data: existingJobs, error: fetchError } = await supabase
     .from('jobs')
-    .delete()
+    .select('id, external_id')
     .eq('company_id', companyId)
 
-  if (currentExternalIds && currentExternalIds.length > 0) {
-    query = query.not('external_id', 'in', `(${currentExternalIds.join(',')})`)
+  if (fetchError) {
+    console.error(`  ✗ Cleanup fetch failed for company ${companyId}:`, fetchError.message)
+    return
   }
 
-  const { error, count } = await query.select()
+  // If no current IDs provided, delete everything (empty company rule)
+  if (currentSet.size === 0) {
+    const staleIds = (existingJobs || []).map(j => j.id)
+    if (!staleIds.length) return
+    await _deleteInBatches(companyId, staleIds)
+    console.log(`  ✓ Cleaned up ${staleIds.length} jobs for emptied company ${companyId}`)
+    return
+  }
 
-  if (error) {
-    console.error(`  ✗ Cleanup failed for company ${companyId}:`, error.message)
-  } else if (count > 0) {
-    console.log(`  ✓ Cleaned up ${count} old/stale jobs for company ${companyId}`)
+  // Find jobs no longer in the current fetch
+  const staleIds = (existingJobs || [])
+    .filter(j => !currentSet.has(j.external_id))
+    .map(j => j.id)
+
+  if (!staleIds.length) return
+
+  await _deleteInBatches(companyId, staleIds)
+  console.log(`  ✓ Cleaned up ${staleIds.length} stale jobs for company ${companyId}`)
+}
+
+async function _deleteInBatches(companyId, rowIds, batchSize = 50) {
+  for (let i = 0; i < rowIds.length; i += batchSize) {
+    const batch = rowIds.slice(i, i + batchSize)
+    const { error } = await supabase
+      .from('jobs')
+      .delete()
+      .in('id', batch)
+    if (error) {
+      console.error(`  ✗ Batch delete failed for company ${companyId}:`, error.message)
+    }
   }
 }
 

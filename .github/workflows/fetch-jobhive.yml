@@ -1,0 +1,53 @@
+name: Fetch Jobs — Jobhive (Daily)
+
+on:
+  schedule:
+    # 7:00 AM IST = 01:30 UTC, runs every day
+    - cron: '30 1 * * *'
+  workflow_dispatch: # Allow manual trigger from GitHub UI
+
+jobs:
+  fetch:
+    runs-on: ubuntu-latest
+    timeout-minutes: 360
+    strategy:
+      fail-fast: false
+      matrix:
+        ats: [greenhouse, workday, smartrecruiters, lever, icims, jazzhr, ashby, join_com, bamboohr]
+
+    steps:
+      - name: Checkout fetcher repo
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js 20
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+
+      - name: Setup Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install Node dependencies
+        run: npm install
+
+      - name: Clone ats-scrapers (Jobhive)
+        run: git clone --depth=1 https://github.com/kalil0321/ats-scrapers.git ../ats-scrapers
+
+      - name: Install Jobhive and dependencies
+        run: |
+          cd ../ats-scrapers
+          python -m pip install --upgrade pip
+          pip install -e ".[scrapers,parquet]"
+
+      - name: Run Jobhive Full Fetcher (${{ matrix.ats }})
+        run: node jobhive-fetcher/run-full.mjs --ats ${{ matrix.ats }} --concurrency 8
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
+
+      - name: Report status
+        if: always()
+        run: echo "Jobhive sync for ${{ matrix.ats }} completed at $(date -u)"
