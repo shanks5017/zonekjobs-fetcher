@@ -13,7 +13,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        ats: [greenhouse, workday, smartrecruiters, lever, icims, jazzhr, ashby, join_com, bamboohr]
+        ats: [ashby, avature, bamboohr, breezy, cornerstone, eightfold, gem, greenhouse, icims, jazzhr, join_com, lever, mercor, oracle, personio, phenom, pinpoint, recruitee, recruiterbox, rippling, smartrecruiters, successfactors, taleo, teamtailor, workable, workday]
 
     steps:
       - name: Checkout fetcher repo
