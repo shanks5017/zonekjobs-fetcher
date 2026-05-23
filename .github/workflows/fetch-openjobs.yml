@@ -1,9 +1,9 @@
-name: Fetch Jobs — OpenJobs (Odd Days)
+name: Fetch Jobs — OpenJobs (Rotating Days)
 
 on:
   schedule:
-    # 6:00 AM IST = 00:30 UTC, runs on odd calendar days
-    - cron: '30 0 1,3,5,7,9,11,13,15,17,19,21,23,25,27,29,31 * *'
+    # 12:01 AM IST = 18:31 UTC of previous day. Runs on rotating days (Group 2).
+    - cron: '31 18 2,6,10,14,18,22,26,30 * *'
   workflow_dispatch: # Allow manual trigger from GitHub UI
 
 jobs:

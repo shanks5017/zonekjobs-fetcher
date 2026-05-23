@@ -137,7 +137,7 @@ async function fetchWorkday(atsUrl, companyName) {
   }
 }
 
-// ─── INDIA RELEVANCE FILTER ───────────────────────────────────────────────────
+// ─── INDIA RELEVANCE FILTER (company level) ────────────────────────────────────────
 
 function isIndiaRelevant(company) {
   const countries = (company.countries || []).map((c) => c.toLowerCase())
@@ -151,6 +151,26 @@ function isIndiaRelevant(company) {
     countries.includes('global') ||
     name.includes('india')
   )
+}
+
+// ─── INDIA / REMOTE JOB-LEVEL FILTER ─────────────────────────────────────────
+// Applied per-job after each ATS fetch — guarantees only India or Remote
+// listings ever reach Supabase regardless of company origin.
+const INDIA_SIGNALS  = ['india', 'bengaluru', 'bangalore', 'mumbai', 'delhi', 'hyderabad',
+                        'pune', 'chennai', 'kolkata', 'noida', 'gurugram', 'gurgaon']
+const REMOTE_SIGNALS = ['remote', 'worldwide', 'global', 'anywhere', 'work from home', 'wfh']
+
+function isIndiaOrRemoteJob(job) {
+  const loc   = (job.location || '').toLowerCase()
+  const title = (job.title    || '').toLowerCase()
+
+  if (job.is_remote === true) return true
+
+  const haystack = `${loc} ${title}`
+  if (INDIA_SIGNALS.some(s  => haystack.includes(s))) return true
+  if (REMOTE_SIGNALS.some(s => haystack.includes(s))) return true
+
+  return false
 }
 
 // ─── DETECT ATS PROVIDER FROM ats_links ───────────────────────────────────────
@@ -205,8 +225,10 @@ async function main() {
     process.exit(1)
   }
 
+  // Process ALL companies — no pre-filtering here.
+  // The isIndiaOrRemoteJob() filter applied per-job is the only gate.
   const targets = companies
-  console.log(`Processing all ${targets.length} global companies`)
+  console.log(`📋 Processing ALL ${targets.length} companies → job-level India/Remote filter will apply`)
 
   let totalJobs = 0
   let processed = 0
@@ -235,36 +257,21 @@ async function main() {
       else if (provider === 'ashby')  jobs = await fetchAshby(token)
       else if (provider === 'workday') jobs = await fetchWorkday(url, company.name)
 
+      // ── Job-level filter: keep only India or Remote listings ───────────────
+      const rawCount = jobs.length
+      jobs = jobs.filter(isIndiaOrRemoteJob)
+      if (rawCount > 0) {
+        console.log(`  🔍 ${rawCount} raw → ${jobs.length} India/Remote kept`)
+      }
+
       // Format countries array into a single capitalized string (e.g. "United states, Canada")
       const countryVal = company.countries && company.countries.length > 0
         ? company.countries.map(c => c.charAt(0).toUpperCase() + c.slice(1).toLowerCase()).join(', ')
         : 'Global';
 
       if (!jobs.length) {
-        // Rule 6: The "Empty Company" Rule
-        // If we found zero jobs, we still need the companyId to clean up old jobs
-        const slug = company.name
-          .toLowerCase()
-          .replace(/[^a-z0-9]/g, '-')
-          .replace(/-+/g, '-')
-          .replace(/^-|-$/g, '')
-          
-        const companyId = await upsertCompany({
-          name: company.name,
-          slug,
-          website: company.website || null,
-          industry: company.industry_category || company.industry || null,
-          country: countryVal,
-          atsProvider: provider,
-          atsToken: token,
-          atsUrl: url,
-          source: 'openjobs'
-        })
-        
-        if (companyId) {
-          await cleanupMissingJobs(companyId, [])
-        }
-        
+        // Skip adding the company to the database if it has 0 jobs
+        console.log(`  - ${company.name}: no jobs found (skipping company creation)`)
         processed++
         continue
       }

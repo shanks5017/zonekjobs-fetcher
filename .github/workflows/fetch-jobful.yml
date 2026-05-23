@@ -1,15 +1,15 @@
-name: Fetch Jobs — OpenPostings (Rotating Days)
+name: Fetch Jobs — Jobful (Rotating Days)
 
 on:
   schedule:
-    # 12:01 AM IST = 18:31 UTC of previous day. Runs on rotating days (Group 3).
-    - cron: '31 18 3,7,11,15,19,23,27,31 * *'
+    # 12:01 AM IST = 18:31 UTC of previous day. Runs on rotating days (Group 4).
+    - cron: '31 18 4,8,12,16,20,24,28 * *'
   workflow_dispatch: # Allow manual trigger from GitHub UI
 
 jobs:
   fetch:
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 60
 
     steps:
       - name: Checkout fetcher repo
@@ -24,15 +24,12 @@ jobs:
       - name: Install dependencies
         run: npm install
 
-      - name: Install Playwright Browsers
-        run: npx playwright install chromium --with-deps
-
-      - name: Run OpenPostings fetcher
-        run: node openpostings/run.mjs
+      - name: Run Jobful fetcher
+        run: node jobful-fetcher/run.mjs
         env:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
 
       - name: Report status
         if: always()
-        run: echo "OpenPostings sync completed at $(date -u)"
+        run: echo "Jobful sync completed at $(date -u)"

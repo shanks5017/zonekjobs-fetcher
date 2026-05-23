@@ -67,6 +67,35 @@ function inferExperienceLevel(title, description) {
   return null
 }
 
+// ─── INDIA / REMOTE JOB FILTER ────────────────────────────────────────────────
+// Returns true only for jobs that are:
+//   • Located in India (city, state, or country match), OR
+//   • Explicitly remote / worldwide / global
+// This is applied per-job so we never store irrelevant listings.
+const INDIA_SIGNALS  = ['india', 'bengaluru', 'bangalore', 'mumbai', 'delhi', 'hyderabad',
+                        'pune', 'chennai', 'kolkata', 'noida', 'gurugram', 'gurgaon', 'in']
+const REMOTE_SIGNALS = ['remote', 'worldwide', 'global', 'anywhere', 'work from home', 'wfh']
+
+function isIndiaOrRemoteJob(job) {
+  const loc     = (job.location    || '').toLowerCase()
+  const country = (job.country     || '').toLowerCase()
+  const title   = (job.title       || '').toLowerCase()
+  const countryIso = (job.country_iso || '').toLowerCase()
+
+  // Explicit remote flag set by jobhive
+  if (job.is_remote === true) return true
+
+  // Country ISO: India = 'in'
+  if (countryIso === 'in') return true
+
+  const haystack = `${loc} ${country} ${title}`
+
+  if (INDIA_SIGNALS.some(s  => haystack.includes(s)))  return true
+  if (REMOTE_SIGNALS.some(s => haystack.includes(s)))  return true
+
+  return false
+}
+
 // ─── JOBHIVE SCRAPER HELPER ──────────────────────────────────────────────────
 async function fetchJobhive(ats, token) {
   const binary = getJobhiveBinary()
@@ -80,7 +109,7 @@ async function fetchJobhive(ats, token) {
     const parsed = JSON.parse(stdout.trim())
     if (!Array.isArray(parsed)) return []
 
-    return parsed.map((job) => {
+    const allJobs = parsed.map((job) => {
       const location    = job.location || null
       const titleLower  = (job.title || '').toLowerCase()
       const isRemote    = job.is_remote ?? (
@@ -127,6 +156,13 @@ async function fetchJobhive(ats, token) {
         source_repo:      'jobhive',
       }
     })
+
+    // ── India / Remote filter ──────────────────────────────────────────────
+    // For India-based companies every job they post is relevant.
+    // For global companies we only keep jobs tagged India or Remote.
+    const filtered = allJobs.filter(j => isIndiaOrRemoteJob(j))
+    console.log(`    🔍 ${allJobs.length} raw → ${filtered.length} India/Remote kept`)
+    return filtered
   } catch (err) {
     // Surface the jobhive error message cleanly (board not found, etc.)
     const msg = err.stderr?.trim() || err.message
@@ -140,74 +176,58 @@ async function fetchJobhive(ats, token) {
 // Workday tokens = full URL (jobhive WorkdayScraper parses subdomain + path).
 // Tesla on Jobhive is its own scraper (ATSType.TESLA), not Greenhouse.
 
+// ─── CURATED COMPANY LIST ────────────────────────────────────────────────────
+// Only India-headquartered companies + remote-first global companies that
+// regularly post India or Remote roles.
+// The isIndiaOrRemoteJob() filter applied at fetch time is the final gate —
+// even global companies here only contribute India/Remote listings.
+
 const CURATED_COMPANIES = [
 
-  // ── Greenhouse ─────────────────────────────────────────────────────────────
-  { name: 'Razorpay',        website: 'razorpay.com',     atsProvider: 'greenhouse', atsToken: 'razorpaysoftwareprivatelimited', country: 'India',          industry: 'Fintech' },
-  { name: 'Postman',         website: 'postman.com',      atsProvider: 'greenhouse', atsToken: 'postman',        country: 'India',          industry: 'Developer Tools' },
-  { name: 'Groww',           website: 'groww.in',         atsProvider: 'greenhouse', atsToken: 'groww',          country: 'India',          industry: 'Fintech' },
-  { name: 'PhonePe',         website: 'phonepe.com',      atsProvider: 'greenhouse', atsToken: 'phonepe',        country: 'India',          industry: 'Fintech' },
-  { name: 'Slice',           website: 'sliceit.com',      atsProvider: 'greenhouse', atsToken: 'slice',          country: 'India',          industry: 'Fintech' },
-  { name: 'InMobi',          website: 'inmobi.com',       atsProvider: 'greenhouse', atsToken: 'inmobi',         country: 'India',          industry: 'AdTech' },
-  { name: 'Anthropic',       website: 'anthropic.com',    atsProvider: 'greenhouse', atsToken: 'anthropic',      country: 'United States',  industry: 'AI' },
-  { name: 'Stripe',          website: 'stripe.com',       atsProvider: 'greenhouse', atsToken: 'stripe',         country: 'United States',  industry: 'Fintech' },
-  { name: 'Figma',           website: 'figma.com',        atsProvider: 'greenhouse', atsToken: 'figma',          country: 'United States',  industry: 'Design' },
-  { name: 'Cloudflare',      website: 'cloudflare.com',   atsProvider: 'greenhouse', atsToken: 'cloudflare',     country: 'United States',  industry: 'Cloud' },
-  { name: 'Datadog',         website: 'datadoghq.com',    atsProvider: 'greenhouse', atsToken: 'datadog',        country: 'United States',  industry: 'DevOps' },
-  { name: 'HashiCorp',       website: 'hashicorp.com',    atsProvider: 'greenhouse', atsToken: 'hashicorp',      country: 'United States',  industry: 'Cloud' },
-  { name: 'Notion',          website: 'notion.so',        atsProvider: 'greenhouse', atsToken: 'notion',         country: 'United States',  industry: 'Productivity' },
-  { name: 'Linear',          website: 'linear.app',       atsProvider: 'greenhouse', atsToken: 'linear',         country: 'United States',  industry: 'Developer Tools' },
-  { name: 'Pagerduty',       website: 'pagerduty.com',    atsProvider: 'greenhouse', atsToken: 'pagerduty',      country: 'United States',  industry: 'DevOps' },
-  { name: 'Checkr',          website: 'checkr.com',       atsProvider: 'greenhouse', atsToken: 'checkr',         country: 'United States',  industry: 'HR Tech' },
+  // ── India-headquartered — Greenhouse ──────────────────────────────────────
+  { name: 'Razorpay',        website: 'razorpay.com',     atsProvider: 'greenhouse', atsToken: 'razorpaysoftwareprivatelimited', country: 'India', industry: 'Fintech' },
+  { name: 'Postman',         website: 'postman.com',      atsProvider: 'greenhouse', atsToken: 'postman',        country: 'India', industry: 'Developer Tools' },
+  { name: 'Groww',           website: 'groww.in',         atsProvider: 'greenhouse', atsToken: 'groww',          country: 'India', industry: 'Fintech' },
+  { name: 'PhonePe',         website: 'phonepe.com',      atsProvider: 'greenhouse', atsToken: 'phonepe',        country: 'India', industry: 'Fintech' },
+  { name: 'Slice',           website: 'sliceit.com',      atsProvider: 'greenhouse', atsToken: 'slice',          country: 'India', industry: 'Fintech' },
+  { name: 'InMobi',          website: 'inmobi.com',       atsProvider: 'greenhouse', atsToken: 'inmobi',         country: 'India', industry: 'AdTech' },
 
-  // ── Lever ──────────────────────────────────────────────────────────────────
-  { name: 'Meesho',          website: 'meesho.com',       atsProvider: 'lever',      atsToken: 'meesho',         country: 'India',          industry: 'E-Commerce' },
-  { name: 'CRED',            website: 'cred.club',        atsProvider: 'lever',      atsToken: 'cred',           country: 'India',          industry: 'Fintech' },
-  { name: 'Coinbase',        website: 'coinbase.com',     atsProvider: 'lever',      atsToken: 'coinbase',       country: 'United States',  industry: 'Crypto' },
-  { name: 'Scale AI',        website: 'scale.com',        atsProvider: 'lever',      atsToken: 'scaleai',        country: 'United States',  industry: 'AI' },
-  { name: 'Airtable',        website: 'airtable.com',     atsProvider: 'lever',      atsToken: 'airtable',       country: 'United States',  industry: 'Productivity' },
-  { name: 'Intercom',        website: 'intercom.com',     atsProvider: 'lever',      atsToken: 'intercom',       country: 'United States',  industry: 'SaaS' },
+  // ── India-headquartered — Lever ───────────────────────────────────────────
+  { name: 'Meesho',          website: 'meesho.com',       atsProvider: 'lever',      atsToken: 'meesho',         country: 'India', industry: 'E-Commerce' },
+  { name: 'CRED',            website: 'cred.club',        atsProvider: 'lever',      atsToken: 'cred',           country: 'India', industry: 'Fintech' },
 
-  // ── Ashby ──────────────────────────────────────────────────────────────────
-  { name: 'Volopay',         website: 'volopay.com',      atsProvider: 'ashby',      atsToken: 'volopay',        country: 'India',          industry: 'Fintech' },
-  { name: 'OpenAI',          website: 'openai.com',       atsProvider: 'ashby',      atsToken: 'openai',         country: 'United States',  industry: 'AI' },
-  { name: 'Perplexity',      website: 'perplexity.ai',    atsProvider: 'ashby',      atsToken: 'perplexityai',   country: 'United States',  industry: 'AI' },
-  { name: 'Mistral AI',      website: 'mistral.ai',       atsProvider: 'ashby',      atsToken: 'mistral',        country: 'France',         industry: 'AI' },
-  { name: 'Vercel',          website: 'vercel.com',       atsProvider: 'ashby',      atsToken: 'vercel',         country: 'United States',  industry: 'Cloud' },
-  { name: 'Planetscale',     website: 'planetscale.com',  atsProvider: 'ashby',      atsToken: 'planetscale',    country: 'United States',  industry: 'Database' },
-  { name: 'Cursor',          website: 'cursor.com',       atsProvider: 'ashby',      atsToken: 'anysphere',      country: 'United States',  industry: 'AI' },
-  { name: 'ElevenLabs',      website: 'elevenlabs.io',    atsProvider: 'ashby',      atsToken: 'elevenlabs',     country: 'United States',  industry: 'AI' },
-  { name: 'Hugging Face',    website: 'huggingface.co',   atsProvider: 'ashby',      atsToken: 'huggingface',    country: 'United States',  industry: 'AI' },
+  // ── India-headquartered — Ashby ───────────────────────────────────────────
+  { name: 'Volopay',         website: 'volopay.com',      atsProvider: 'ashby',      atsToken: 'volopay',        country: 'India', industry: 'Fintech' },
 
-  // ── SmartRecruiters ────────────────────────────────────────────────────────
-  { name: 'Freshworks',      website: 'freshworks.com',   atsProvider: 'smartrecruiters', atsToken: 'Freshworks',  country: 'India',         industry: 'SaaS' },
-  { name: 'Unacademy',       website: 'unacademy.com',    atsProvider: 'smartrecruiters', atsToken: 'Unacademy',   country: 'India',         industry: 'EdTech' },
-  { name: 'Capgemini',       website: 'capgemini.com',    atsProvider: 'smartrecruiters', atsToken: 'capgemini',   country: 'France',        industry: 'IT Services' },
-  { name: 'IKEA',            website: 'ikea.com',         atsProvider: 'smartrecruiters', atsToken: 'IKEA',        country: 'Sweden',        industry: 'Retail' },
+  // ── India-headquartered — SmartRecruiters ─────────────────────────────────
+  { name: 'Freshworks',      website: 'freshworks.com',   atsProvider: 'smartrecruiters', atsToken: 'Freshworks',  country: 'India', industry: 'SaaS' },
+  { name: 'Unacademy',       website: 'unacademy.com',    atsProvider: 'smartrecruiters', atsToken: 'Unacademy',   country: 'India', industry: 'EdTech' },
 
-  // ── Workday ─────────────────────────────────────────────────────────────────
-  // Token = full myworkdayjobs.com URL. Jobhive's WorkdayScraper parses the subdomain.
-  { name: 'Walmart',         website: 'walmart.com',      atsProvider: 'workday',    atsToken: 'https://walmart.wd5.myworkdayjobs.com/en-US/Walmart_External_Careers',    country: 'United States',  industry: 'Retail' },
-  { name: 'Deloitte',        website: 'deloitte.com',     atsProvider: 'workday',    atsToken: 'https://deloitte.wd2.myworkdayjobs.com/Deloitte_External_Careers',        country: 'United States',  industry: 'Consulting' },
-  { name: 'Unilever',        website: 'unilever.com',     atsProvider: 'workday',    atsToken: 'https://unilever.wd5.myworkdayjobs.com/Unilever_External_Careers',        country: 'United Kingdom', industry: 'Consumer Goods' },
-  { name: 'Goldman Sachs',   website: 'goldmansachs.com', atsProvider: 'workday',    atsToken: 'https://gs.wd1.myworkdayjobs.com/External_Career_Site',                  country: 'United States',  industry: 'Finance' },
-  { name: 'Target',          website: 'target.com',       atsProvider: 'workday',    atsToken: 'https://target.wd5.myworkdayjobs.com/External_Careers',                  country: 'United States',  industry: 'Retail' },
-  { name: 'Boeing',          website: 'boeing.com',       atsProvider: 'workday',    atsToken: 'https://boeing.wd1.myworkdayjobs.com/external',                          country: 'United States',  industry: 'Aerospace' },
-  { name: 'Swiggy',          website: 'swiggy.com',       atsProvider: 'workday',    atsToken: 'https://swiggy.wd3.myworkdayjobs.com/Swiggy',                            country: 'India',          industry: 'Food Delivery' },
-  { name: 'Infosys',         website: 'infosys.com',      atsProvider: 'workday',    atsToken: 'https://infosys.wd3.myworkdayjobs.com/Infosys_Careers',                  country: 'India',          industry: 'IT Services' },
-  { name: 'Wipro',           website: 'wipro.com',        atsProvider: 'workday',    atsToken: 'https://wipro.wd3.myworkdayjobs.com/External',                           country: 'India',          industry: 'IT Services' },
+  // ── India-headquartered — Workday ─────────────────────────────────────────
+  { name: 'Swiggy',          website: 'swiggy.com',       atsProvider: 'workday',    atsToken: 'https://swiggy.wd3.myworkdayjobs.com/Swiggy',           country: 'India', industry: 'Food Delivery' },
+  { name: 'Infosys',         website: 'infosys.com',      atsProvider: 'workday',    atsToken: 'https://infosys.wd3.myworkdayjobs.com/Infosys_Careers',  country: 'India', industry: 'IT Services' },
+  { name: 'Wipro',           website: 'wipro.com',        atsProvider: 'workday',    atsToken: 'https://wipro.wd3.myworkdayjobs.com/External',           country: 'India', industry: 'IT Services' },
 
-  // ── SAP SuccessFactors ────────────────────────────────────────────────────
-  { name: 'Samsung',         website: 'samsung.com',      atsProvider: 'successfactors', atsToken: 'samsung',    country: 'South Korea',    industry: 'Electronics' },
-  { name: 'Siemens',         website: 'siemens.com',      atsProvider: 'successfactors', atsToken: 'siemens',    country: 'Germany',        industry: 'Engineering' },
-  { name: 'Nestlé',          website: 'nestle.com',       atsProvider: 'successfactors', atsToken: 'nestle',     country: 'Switzerland',    industry: 'Consumer Goods' },
-  { name: 'Volkswagen',      website: 'volkswagen.com',   atsProvider: 'successfactors', atsToken: 'volkswagenag', country: 'Germany',      industry: 'Automotive' },
+  // ── Remote-first global companies (kept because they actively hire remotely
+  //    or have strong India offices — isIndiaOrRemoteJob() filters per listing)
+  { name: 'Anthropic',       website: 'anthropic.com',    atsProvider: 'greenhouse', atsToken: 'anthropic',      country: 'United States', industry: 'AI' },
+  { name: 'Cloudflare',      website: 'cloudflare.com',   atsProvider: 'greenhouse', atsToken: 'cloudflare',     country: 'United States', industry: 'Cloud' },
+  { name: 'Datadog',         website: 'datadoghq.com',    atsProvider: 'greenhouse', atsToken: 'datadog',        country: 'United States', industry: 'DevOps' },
+  { name: 'Notion',          website: 'notion.so',        atsProvider: 'greenhouse', atsToken: 'notion',         country: 'United States', industry: 'Productivity' },
+  { name: 'Stripe',          website: 'stripe.com',       atsProvider: 'greenhouse', atsToken: 'stripe',         country: 'United States', industry: 'Fintech' },
+  { name: 'Scale AI',        website: 'scale.com',        atsProvider: 'lever',      atsToken: 'scaleai',        country: 'United States', industry: 'AI' },
+  { name: 'Coinbase',        website: 'coinbase.com',     atsProvider: 'lever',      atsToken: 'coinbase',       country: 'United States', industry: 'Crypto' },
+  { name: 'OpenAI',          website: 'openai.com',       atsProvider: 'ashby',      atsToken: 'openai',         country: 'United States', industry: 'AI' },
+  { name: 'Vercel',          website: 'vercel.com',       atsProvider: 'ashby',      atsToken: 'vercel',         country: 'United States', industry: 'Cloud' },
+  { name: 'Hugging Face',    website: 'huggingface.co',   atsProvider: 'ashby',      atsToken: 'huggingface',    country: 'United States', industry: 'AI' },
+  { name: 'ElevenLabs',      website: 'elevenlabs.io',    atsProvider: 'ashby',      atsToken: 'elevenlabs',     country: 'United States', industry: 'AI' },
+  { name: 'Perplexity',      website: 'perplexity.ai',    atsProvider: 'ashby',      atsToken: 'perplexityai',   country: 'United States', industry: 'AI' },
+  { name: 'Mistral AI',      website: 'mistral.ai',       atsProvider: 'ashby',      atsToken: 'mistral',        country: 'France',        industry: 'AI' },
 
-  // ── Tesla (Jobhive has a dedicated TeslaScraper) ──────────────────────────
-  { name: 'Tesla',           website: 'tesla.com',        atsProvider: 'tesla',      atsToken: 'tesla',          country: 'United States',  industry: 'Automotive / EV' },
-
-  // ── Amazon (dedicated AmazonScraper) ─────────────────────────────────────
-  { name: 'Amazon',          website: 'amazon.com',       atsProvider: 'amazon',     atsToken: 'amazon',         country: 'United States',  industry: 'E-Commerce / Cloud' },
+  // ── Global with large India offices (job-level filter still applies) ───────
+  { name: 'Deloitte',        website: 'deloitte.com',     atsProvider: 'workday',    atsToken: 'https://deloitte.wd2.myworkdayjobs.com/Deloitte_External_Careers', country: 'United States', industry: 'Consulting' },
+  { name: 'Goldman Sachs',   website: 'goldmansachs.com', atsProvider: 'workday',    atsToken: 'https://gs.wd1.myworkdayjobs.com/External_Career_Site',           country: 'United States', industry: 'Finance' },
+  { name: 'Capgemini',       website: 'capgemini.com',    atsProvider: 'smartrecruiters', atsToken: 'capgemini', country: 'France', industry: 'IT Services' },
 ]
 
 // ─── MAIN RUNNER ──────────────────────────────────────────────────────────────
@@ -265,10 +285,8 @@ async function main() {
       }
 
       if (!jobs.length) {
-        console.log(`  ⚠  No jobs — upserting company record only`)
+        console.log(`  ⚠  No jobs — skipping company creation`)
         skipped++
-        const companyId = await upsertCompany(companyPayload)
-        if (companyId) await cleanupMissingJobs(companyId, [])
         continue
       }
 

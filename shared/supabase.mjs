@@ -33,7 +33,47 @@ export async function upsertCompany(company) {
     'breezy.hr'
   ]
 
-  if (company.website) {
+  const DOMAIN_OVERRIDES = {
+    'upsc': 'upsc.gov.in',
+    'indian army': 'indianarmy.nic.in',
+    'indian navy': 'indiannavy.nic.in',
+    'iaf': 'indianairforce.nic.in',
+    'ssb': 'ssb.gov.in',
+    'drdo': 'drdo.gov.in',
+    'rvnl': 'rvnl.org',
+    'dmrc': 'delhimetrorail.com',
+    'irctc': 'irctc.co.in',
+    'gmrcl': 'gujaratmetrorail.com',
+    'bro': 'bro.gov.in',
+    'rrc secr': 'secr.indianrailways.gov.in',
+    'secr': 'secr.indianrailways.gov.in',
+    'konkan railway': 'konkanrailway.com',
+    'krcl': 'konkanrailway.com',
+    'isro': 'isro.gov.in',
+    'sbi': 'sbi.co.in',
+    'ibps': 'ibps.in',
+    'lic': 'licindia.in',
+    'rbi': 'rbi.org.in',
+    'meesho': 'meesho.com',
+    'cred': 'cred.club',
+    'swiggy': 'swiggy.com',
+    'paytm': 'paytm.com',
+    'phonepe': 'phonepe.com',
+    'razorpay': 'razorpay.com',
+    'groww': 'groww.in'
+  }
+
+  const cleanCompanyName = (company.name || '').toLowerCase().trim()
+  let hasOverride = false
+  for (const [key, val] of Object.entries(DOMAIN_OVERRIDES)) {
+    if (cleanCompanyName === key || cleanCompanyName.includes(key)) {
+      resolvedDomain = val
+      hasOverride = true
+      break
+    }
+  }
+
+  if (!hasOverride && company.website) {
     try {
       const urlStr = company.website.startsWith('http') ? company.website : `https://${company.website}`
       const url = new URL(urlStr)
@@ -58,14 +98,9 @@ export async function upsertCompany(company) {
   }
 
   if (resolvedDomain) {
-    // Strip subdomains if present (e.g. jobs.meesho.com -> meesho.com)
-    const parts = resolvedDomain.split('.')
-    if (parts.length > 2) {
-      resolvedDomain = parts.slice(-2).join('.')
-    }
-    
-    // Primary: Clearbit premium logo, fallback handled gracefully by frontend onError
-    logo_url = `https://logo.clearbit.com/${resolvedDomain.toLowerCase()}?size=128`
+    // For Google's Favicon API, keeping the full subdomain is better.
+    // However, if we don't have an override and it was a custom website, we can use it.
+    logo_url = `https://www.google.com/s2/favicons?sz=128&domain=${resolvedDomain.toLowerCase()}`
   }
 
   const { data, error } = await supabase

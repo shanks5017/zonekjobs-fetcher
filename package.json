@@ -12,13 +12,17 @@
     "fetch:jobhive:smartrecruiters": "node --env-file=.env jobhive-fetcher/run-full.mjs --ats smartrecruiters --concurrency 4 --resume",
     "fetch:jobhive:workday": "node --env-file=.env jobhive-fetcher/run-full.mjs --ats workday --concurrency 2 --resume",
     "fetch:jobhive:all": "node --env-file=.env jobhive-fetcher/run-full.mjs --ats all --concurrency 4 --resume",
-    "fetch:all": "concurrently \"npm run fetch:openjobs\" \"npm run fetch:openpostings\" \"npm run fetch:jobhive\"",
+    "fetch:jobful": "node --env-file=.env jobful-fetcher/run.mjs",
+    "fetch:all": "concurrently \"npm run fetch:openjobs\" \"npm run fetch:openpostings\" \"npm run fetch:jobhive\" \"npm run fetch:jobful\"",
     "test:connection": "node --env-file=.env shared/test-connection.mjs"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.39.0",
+    "cheerio": "^1.0.0-rc.3",
     "node-fetch": "^3.3.2",
-    "playwright": "^1.40.0"
+    "playwright": "^1.40.0",
+    "request": "^2.88.2",
+    "signale": "^1.4.0"
   },
   "devDependencies": {
     "concurrently": "^9.2.1"

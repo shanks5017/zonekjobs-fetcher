@@ -169,6 +169,29 @@ function mapJobs(rawJobs) {
   })
 }
 
+// ─── INDIA / REMOTE JOB-LEVEL FILTER ────────────────────────────────────────────────
+// Runs per-job after mapping — only India-located or Remote jobs are stored.
+// This is the final quality gate for the full-scale CSV pipeline.
+const INDIA_SIGNALS  = ['india', 'bengaluru', 'bangalore', 'mumbai', 'delhi', 'hyderabad',
+                        'pune', 'chennai', 'kolkata', 'noida', 'gurugram', 'gurgaon']
+const REMOTE_SIGNALS = ['remote', 'worldwide', 'global', 'anywhere', 'work from home', 'wfh']
+
+function isIndiaOrRemoteJob(job) {
+  const loc        = (job.location || '').toLowerCase()
+  const country    = (job.country  || '').toLowerCase()
+  const title      = (job.title    || '').toLowerCase()
+  const countryIso = (job.country_iso || '').toLowerCase()
+
+  if (job.is_remote === true) return true
+  if (countryIso === 'in')    return true
+
+  const haystack = `${loc} ${country} ${title}`
+  if (INDIA_SIGNALS.some(s  => haystack.includes(s))) return true
+  if (REMOTE_SIGNALS.some(s => haystack.includes(s))) return true
+
+  return false
+}
+
 // ─── SINGLE COMPANY SCRAPE WITH RETRY ─────────────────────────────────────────
 async function scrapeWithRetry(binary, ats, token, maxRetries = 3) {
   for (let attempt = 1; attempt <= maxRetries; attempt++) {
@@ -323,6 +346,23 @@ async function main() {
       }
 
       try {
+        if (!raw.length) {
+          checkpoint[ats].done.push(token)
+          processed++
+          return
+        }
+
+        const mapped = mapJobs(raw)
+
+        // ── India / Remote gate ─────────────────────────────────────────────────────
+        const filteredMapped = mapped.filter(isIndiaOrRemoteJob)
+
+        if (!filteredMapped.length) {
+          checkpoint[ats].done.push(token)
+          processed++
+          return
+        }
+
         const slug = name.toLowerCase().replace(/[^a-z0-9]/g, '-').replace(/-+/g, '-').replace(/^-|-$/g, '')
         const companyId = await upsertCompany({
           name,
@@ -338,18 +378,11 @@ async function main() {
 
         if (!companyId) { atsErrors++; processed++; return }
 
-        if (!raw.length) {
-          await cleanupMissingJobs(companyId, [])
-          checkpoint[ats].done.push(token)
-          processed++
-          return
-        }
+        const jobsToUpsert = filteredMapped.map(j => ({ ...j, company_id: companyId }))
+        await upsertJobs(jobsToUpsert)
+        await cleanupMissingJobs(companyId, jobsToUpsert.map(j => j.external_id))
 
-        const mapped = mapJobs(raw).map(j => ({ ...j, company_id: companyId }))
-        await upsertJobs(mapped)
-        await cleanupMissingJobs(companyId, mapped.map(j => j.external_id))
-
-        atsTotal += mapped.length
+        atsTotal += jobsToUpsert.length
         checkpoint[ats].done.push(token)
       } catch (err) {
         checkpoint[ats].failed.push(token)
