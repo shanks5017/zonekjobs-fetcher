@@ -9,6 +9,7 @@
 import { createRequire } from 'module'
 import { fileURLToPath } from 'url'
 import path from 'path'
+import * as cheerio from 'cheerio'
 
 const require = createRequire(import.meta.url)
 const scraper = require('../jobful-api-master/customModules/freejobalerts/scraper.js')
@@ -46,6 +47,63 @@ function parseDate(dateStr) {
 
 function delay(ms) {
   return new Promise(resolve => setTimeout(resolve, ms))
+}
+
+async function fetchJobDescription(url) {
+  if (!url || !url.startsWith('http')) return 'No detailed job description provided.'
+  try {
+    const res = await fetch(url, {
+      headers: {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
+      }
+    })
+    if (!res.ok) return 'No detailed job description provided.'
+    const html = await res.text()
+    const $ = cheerio.load(html)
+    
+    // Get paragraphs inside entry-content or post
+    const paragraphs = $('.entry-content p, .post p').toArray()
+    const cleanParagraphs = []
+    
+    for (const p of paragraphs) {
+      const text = $(p).text().trim()
+      if (!text) continue
+      
+      const lower = text.toLowerCase()
+      // Skip promotional / social / app links
+      if (
+        lower.includes('whatsapp') ||
+        lower.includes('telegram') ||
+        lower.includes('instagram') ||
+        lower.includes('youtube') ||
+        lower.includes('google news') ||
+        lower.includes('follow us') ||
+        lower.includes('mobile app') ||
+        lower.includes('play fun games') ||
+        lower.startsWith('advertisement') ||
+        lower.includes('adsbygoogle')
+      ) {
+        continue
+      }
+      
+      cleanParagraphs.push(text)
+    }
+    
+    // Fallback: If no paragraphs found, get table text summary
+    if (cleanParagraphs.length === 0) {
+      const tableText = $('.entry-content table, .post table').first().text().trim()
+      if (tableText) {
+        return tableText.replace(/\s+/g, ' ').slice(0, 2000)
+      }
+    }
+    
+    const desc = cleanParagraphs.slice(0, 6).join('\n\n')
+    return desc || 'No detailed job description provided.'
+    
+  } catch (err) {
+    console.error(`  ⚠️ Failed to fetch description from ${url}:`, err.message)
+    return 'No detailed job description provided.'
+  }
 }
 
 async function main() {
@@ -150,12 +208,51 @@ async function main() {
 
     console.log(`\n🏢 Processing recruitment board: "${board}" (${rawJobs.length} jobs)`)
 
+    // Map jobs to schema (fetch detailed description for each)
+    const mappedJobs = []
+    for (const j of rawJobs) {
+      let cleanLink = j.link || 'https://www.freejobalert.com/'
+      if (cleanLink && !cleanLink.startsWith('http')) {
+        cleanLink = new URL(cleanLink, 'https://www.freejobalert.com/').toString()
+      }
+
+      const externalId = `fja-${companySlug}-${j.postName || ''}-${j.advtNo || ''}`
+        .toLowerCase()
+        .replace(/[^a-z0-9]/g, '-')
+        .replace(/-+/g, '-')
+        .replace(/^-|-$/g, '')
+
+      let description = 'No detailed job description provided.'
+      if (cleanLink.startsWith('http')) {
+        console.log(`  🔍 Fetching detailed description for: ${j.postName}...`)
+        description = await fetchJobDescription(cleanLink)
+        console.log(`    ↳ Preview: ${description.slice(0, 150).replace(/\n/g, ' ')}...`)
+        // Be polite to the server
+        await delay(200)
+      }
+
+      mappedJobs.push({
+        company_id: null,
+        external_id: externalId,
+        title: j.postName || 'Government Job Opportunity',
+        description: description,
+        location: j.location || 'India',
+        is_remote: false,
+        apply_url: cleanLink,
+        ats_provider: 'freejobalert',
+        job_type: 'fulltime',
+        department: j.qualification || null,
+        posted_at: parseDate(j.postDate),
+        fetched_at: new Date().toISOString(),
+        is_active: true,
+        source_repo: 'jobful-api'
+      })
+    }
+
     if (isDryRun) {
       console.log(`  [DRY RUN] Would upsert company: ${board}`)
-      for (const rj of rawJobs) {
-        console.log(`  [DRY RUN] Would upsert job: ${rj.postName} | Link: ${rj.link}`)
-      }
-      totalUpserted += rawJobs.length
+      console.log(`  [DRY RUN] Would upsert ${mappedJobs.length} jobs`)
+      totalUpserted += mappedJobs.length
       continue
     }
 
@@ -178,37 +275,10 @@ async function main() {
         continue
       }
 
-      // Map jobs to schema
-      const mappedJobs = rawJobs.map((j) => {
-        let cleanLink = j.link || 'https://www.freejobalert.com/'
-        if (cleanLink && !cleanLink.startsWith('http')) {
-          cleanLink = new URL(cleanLink, 'https://www.freejobalert.com/').toString()
-        }
+      // Associate companyId
+      const jobsWithCompany = mappedJobs.map(job => ({ ...job, company_id: companyId }))
 
-        const externalId = `fja-${companySlug}-${j.postName || ''}-${j.advtNo || ''}`
-          .toLowerCase()
-          .replace(/[^a-z0-9]/g, '-')
-          .replace(/-+/g, '-')
-          .replace(/^-|-$/g, '')
-
-        return {
-          company_id: companyId,
-          external_id: externalId,
-          title: j.postName || 'Government Job Opportunity',
-          location: j.location || 'India',
-          is_remote: false,
-          apply_url: cleanLink,
-          ats_provider: 'freejobalert',
-          job_type: 'fulltime',
-          department: j.qualification || null,
-          posted_at: parseDate(j.postDate),
-          fetched_at: new Date().toISOString(),
-          is_active: true,
-          source_repo: 'jobful-api'
-        }
-      })
-
-      const count = await upsertJobs(mappedJobs)
+      const count = await upsertJobs(jobsWithCompany)
       totalUpserted += count
       console.log(`  ✓ Successfully upserted ${count} jobs`)
 
