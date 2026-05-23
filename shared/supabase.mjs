@@ -34,26 +34,60 @@ export async function upsertCompany(company) {
   ]
 
   const DOMAIN_OVERRIDES = {
+    // Government / Defense
     'upsc': 'upsc.gov.in',
     'indian army': 'indianarmy.nic.in',
     'indian navy': 'indiannavy.nic.in',
     'iaf': 'indianairforce.nic.in',
     'ssb': 'ssb.gov.in',
     'drdo': 'drdo.gov.in',
+    'isro': 'isro.gov.in',
+    'bro': 'bro.gov.in',
+    'assam rifles': 'assamrifles.gov.in',
+
+    // Infrastructure & Transport
     'rvnl': 'rvnl.org',
     'dmrc': 'delhimetrorail.com',
     'irctc': 'irctc.co.in',
     'gmrcl': 'gujaratmetrorail.com',
-    'bro': 'bro.gov.in',
+    'gmrc': 'gujaratmetrorail.com',
     'rrc secr': 'secr.indianrailways.gov.in',
     'secr': 'secr.indianrailways.gov.in',
     'konkan railway': 'konkanrailway.com',
     'krcl': 'konkanrailway.com',
-    'isro': 'isro.gov.in',
+    'railtel': 'railtelindia.com',
+    'rites': 'rites.com',
+    'kmrl': 'kochimetro.org',
+    'mpmrcl': 'mpmetrorail.com',
+    'rrb': 'rrcb.gov.in',
+    'east coast railway': 'eastcoastrail.indianrailways.gov.in',
+
+    // Banking & Financial Institutions
     'sbi': 'sbi.co.in',
+    'state bank of india': 'sbi.co.in',
     'ibps': 'ibps.in',
     'lic': 'licindia.in',
     'rbi': 'rbi.org.in',
+    'nabard': 'nabard.org',
+    'sidbi': 'sidbi.in',
+    'bank of baroda': 'bankofbaroda.in',
+    'bank of india': 'bankofindia.co.in',
+    'central bank of india': 'centralbankofindia.co.in',
+    'idbi bank': 'idbibank.in',
+    'punjab & sind bank': 'punjabandsindbank.co.in',
+    'south indian bank': 'southindianbank.com',
+    'exim bank': 'eximbankindia.in',
+    'tnsc bank': 'tnscbank.com',
+    'tscab': 'tscab.org',
+    'tgcab': 'tgcab.org',
+    'cbhfl': 'cbhfl.com',
+    'rnsb': 'rnsbindia.com',
+
+    // State / Local
+    'salem': 'salem.nic.in',
+    'kanchipuram': 'kanchipuram.nic.in',
+
+    // Curated Startups / Tech
     'meesho': 'meesho.com',
     'cred': 'cred.club',
     'swiggy': 'swiggy.com',
