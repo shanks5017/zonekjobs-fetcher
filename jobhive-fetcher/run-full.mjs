@@ -22,9 +22,22 @@ import path from 'path'
 import { fileURLToPath } from 'url'
 import { execFile } from 'child_process'
 import { promisify } from 'util'
+import * as cheerio from 'cheerio'
 import { upsertCompany, upsertJobs, cleanupMissingJobs, expireOldJobs, logRun } from '../shared/supabase.mjs'
 
 const execFileAsync = promisify(execFile)
+
+function cleanDescription(html) {
+  if (!html) return null
+  if (!html.includes('<')) return html.slice(0, 8000).trim()
+  try {
+    const $ = cheerio.load(html)
+    return $.text().trim().replace(/\s+/g, ' ').slice(0, 8000)
+  } catch (e) {
+    return html.slice(0, 8000)
+  }
+}
+
 const __filename = fileURLToPath(import.meta.url)
 const __dirname  = path.dirname(__filename)
 
@@ -151,7 +164,7 @@ function mapJobs(rawJobs) {
       ats_provider:     job.ats_type,
       apply_url:        String(job.apply_url || job.url || ''),
       title:            job.title,
-      description:      job.description ? job.description.slice(0, 8000) : null,
+      description:      cleanDescription(job.description),
       location:         loc,
       country:          job.country_iso || null,
       is_remote:        job.is_remote ?? (t.includes('remote') || (loc || '').toLowerCase().includes('remote')),
