@@ -30,7 +30,24 @@ export async function upsertCompany(company) {
     'smartrecruiters.com',
     'recruitee.com',
     'bamboohr.com',
-    'breezy.hr'
+    'breezy.hr',
+    'avature.net',
+    'eightfold.ai',
+    'gem.com',
+    'icims.com',
+    'applytojob.com',
+    'join.com',
+    'personio.de',
+    'personio.com',
+    'personio.co.uk',
+    'rippling.com',
+    'recruiterbox.com',
+    'jobs2web.com',
+    'taleo.net',
+    'teamtailor.com',
+    'workable.com',
+    'cornerstoneondemand.com',
+    'jobvite.com'
   ]
 
   const DOMAIN_OVERRIDES = {
