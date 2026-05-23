@@ -21,6 +21,7 @@ async function fetchGreenhouse(token) {
     return (data.jobs || []).map((job) => ({
       external_id: String(job.id),
       title: job.title,
+      description: job.content || null,
       location: job.location?.name || 'Remote',
       is_remote: (job.location?.name || '').toLowerCase().includes('remote'),
       apply_url: job.absolute_url,
@@ -45,26 +46,35 @@ async function fetchLever(token) {
     )
     if (!res.ok) return []
     const data = await res.json()
-    return (data || []).map((job) => ({
-      external_id: job.id,
-      title: job.text,
-      location: job.categories?.location || 'Remote',
-      is_remote: (job.categories?.location || '').toLowerCase().includes('remote'),
-      apply_url: job.hostedUrl,
-      ats_provider: 'lever',
-      job_type: (job.categories?.commitment || '')
-        .toLowerCase()
-        .includes('intern')
-        ? 'internship'
-        : 'fulltime',
-      department: job.categories?.department || null,
-      posted_at: job.createdAt
-        ? new Date(job.createdAt).toISOString()
-        : new Date().toISOString(),
-      fetched_at: new Date().toISOString(),
-      is_active: true,
-      source_repo: 'openjobs'
-    }))
+    return (data || []).map((job) => {
+      let desc = job.description || ''
+      if (job.lists && job.lists.length > 0) {
+        desc += '\n\n' + job.lists.map(l => `<h3>${l.text}</h3>\n<ul>\n${l.content}</ul>`).join('\n\n')
+      }
+      if (job.additional) desc += '\n\n' + job.additional
+
+      return {
+        external_id: job.id,
+        title: job.text,
+        description: desc || null,
+        location: job.categories?.location || 'Remote',
+        is_remote: (job.categories?.location || '').toLowerCase().includes('remote'),
+        apply_url: job.hostedUrl,
+        ats_provider: 'lever',
+        job_type: (job.categories?.commitment || '')
+          .toLowerCase()
+          .includes('intern')
+          ? 'internship'
+          : 'fulltime',
+        department: job.categories?.department || null,
+        posted_at: job.createdAt
+          ? new Date(job.createdAt).toISOString()
+          : new Date().toISOString(),
+        fetched_at: new Date().toISOString(),
+        is_active: true,
+        source_repo: 'openjobs'
+      }
+    })
   } catch (err) {
     console.error(`  ✗ Lever [${token}]:`, err.message)
     return []
@@ -81,6 +91,7 @@ async function fetchAshby(token) {
     return (data.jobs || []).map((job) => ({
       external_id: job.id,
       title: job.title,
+      description: job.descriptionHtml || job.descriptionPlain || null,
       location: job.location || 'Remote',
       is_remote: (job.location || '').toLowerCase().includes('remote'),
       apply_url: job.jobUrl,
