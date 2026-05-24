@@ -17,6 +17,7 @@
     "enrich:companies": "node --env-file=.env company-enricher/run.mjs",
     "enrich:companies:force": "node --env-file=.env company-enricher/run.mjs --force",
     "enrich:companies:dry": "node --env-file=.env company-enricher/run.mjs --dry-run",
+    "clean:companies": "node --env-file=.env company-enricher/cleanup.mjs",
     "test:connection": "node --env-file=.env shared/test-connection.mjs"
   },
   "dependencies": {

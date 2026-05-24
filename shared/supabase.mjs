@@ -287,20 +287,93 @@ export async function expireOldJobs(daysOld = 30) {
 
 /**
  * Fetch companies that have never been enriched (enriched_at IS NULL).
+ * Only fetches companies that currently have at least one active job.
  * Used by the company-enricher script on normal runs.
  */
 export async function getUnenrichedCompanies(limit = 100) {
   const { data, error } = await supabase
     .from('companies')
-    .select('id, name, slug, website, ats_provider, ats_token, ats_url')
+    .select('id, name, slug, website, ats_provider, ats_token, ats_url, jobs!inner(id)')
     .is('enriched_at', null)
-    .order('created_at', { ascending: true })
+    .eq('jobs.is_active', true)
     .limit(limit)
+
   if (error) {
     console.error('  ✗ getUnenrichedCompanies error:', error.message)
     return []
   }
-  return data || []
+
+  // Deduplicate results because inner join returns a row per matching job
+  const uniqueCompanies = []
+  const seen = new Set()
+  for (const item of (data || [])) {
+    if (!seen.has(item.id)) {
+      seen.add(item.id)
+      const { jobs, ...company } = item
+      uniqueCompanies.push(company)
+    }
+  }
+
+  return uniqueCompanies
+}
+
+/**
+ * Deletes all companies that have 0 jobs associated with them.
+ * This keeps the database clean and removes stale/empty company records.
+ */
+export async function deleteEmptyCompanies() {
+  console.log('🧹 Cleaning up empty companies (0 jobs)...')
+
+  // We can invoke a direct delete using a subquery check
+  // However, supabase-js doesn't easily support NOT IN subqueries directly,
+  // so we fetch the list of company IDs that have jobs, and delete any company not in that list.
+  const { data: jobsData, error: jobsError } = await supabase
+    .from('jobs')
+    .select('company_id')
+
+  if (jobsError) {
+    console.error('  ✗ Failed to fetch active company jobs:', jobsError.message)
+    return
+  }
+
+  const activeCompanyIds = new Set(jobsData.map(j => j.company_id).filter(Boolean))
+
+  const { data: companiesData, error: companiesError } = await supabase
+    .from('companies')
+    .select('id, name')
+
+  if (companiesError) {
+    console.error('  ✗ Failed to fetch companies list:', companiesError.message)
+    return
+  }
+
+  const emptyCompanies = companiesData.filter(c => !activeCompanyIds.has(c.id))
+
+  if (emptyCompanies.length === 0) {
+    console.log('  ✓ No empty companies found.')
+    return
+  }
+
+  console.log(`  Found ${emptyCompanies.length} empty companies to delete.`)
+
+  // Delete in batches of 100 to avoid long query parameters
+  const batchSize = 100
+  let deletedCount = 0
+  for (let i = 0; i < emptyCompanies.length; i += batchSize) {
+    const batch = emptyCompanies.slice(i, i + batchSize).map(c => c.id)
+    const { error: deleteError } = await supabase
+      .from('companies')
+      .delete()
+      .in('id', batch)
+
+    if (deleteError) {
+      console.error('  ✗ Failed to delete batch:', deleteError.message)
+    } else {
+      deletedCount += batch.length
+    }
+  }
+
+  console.log(`  ✓ Successfully deleted ${deletedCount} empty companies.`)
 }
 
 /**
