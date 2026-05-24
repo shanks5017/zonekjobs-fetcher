@@ -14,6 +14,9 @@
     "fetch:jobhive:all": "node --env-file=.env jobhive-fetcher/run-full.mjs --ats all --concurrency 4 --resume",
     "fetch:jobful": "node --env-file=.env jobful-fetcher/run.mjs",
     "fetch:all": "concurrently \"npm run fetch:openjobs\" \"npm run fetch:openpostings\" \"npm run fetch:jobhive\" \"npm run fetch:jobful\"",
+    "enrich:companies": "node --env-file=.env company-enricher/run.mjs",
+    "enrich:companies:force": "node --env-file=.env company-enricher/run.mjs --force",
+    "enrich:companies:dry": "node --env-file=.env company-enricher/run.mjs --dry-run",
     "test:connection": "node --env-file=.env shared/test-connection.mjs"
   },
   "dependencies": {

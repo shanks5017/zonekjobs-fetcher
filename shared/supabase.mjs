@@ -283,6 +283,75 @@ export async function expireOldJobs(daysOld = 30) {
   }
 }
 
+// ─── COMPANY ENRICHMENT HELPERS ──────────────────────────────────────────────
+
+/**
+ * Fetch companies that have never been enriched (enriched_at IS NULL).
+ * Used by the company-enricher script on normal runs.
+ */
+export async function getUnenrichedCompanies(limit = 100) {
+  const { data, error } = await supabase
+    .from('companies')
+    .select('id, name, slug, website, ats_provider, ats_token, ats_url')
+    .is('enriched_at', null)
+    .order('created_at', { ascending: true })
+    .limit(limit)
+  if (error) {
+    console.error('  ✗ getUnenrichedCompanies error:', error.message)
+    return []
+  }
+  return data || []
+}
+
+/**
+ * Fetch all companies regardless of enrichment status.
+ * Used when --force flag is passed to the enricher.
+ */
+export async function getAllCompanies(limit = 100) {
+  const { data, error } = await supabase
+    .from('companies')
+    .select('id, name, slug, website, ats_provider, ats_token, ats_url')
+    .order('updated_at', { ascending: true })
+    .limit(limit)
+  if (error) {
+    console.error('  ✗ getAllCompanies error:', error.message)
+    return []
+  }
+  return data || []
+}
+
+/**
+ * Write enrichment results back to a company row.
+ * Only updates the four enrichment fields + enriched_at timestamp.
+ * Does NOT touch jobs, ats_provider, slug, or any other existing fields.
+ *
+ * @param {string} companyId  - Supabase UUID
+ * @param {object} data
+ * @param {string|null} data.logo_url
+ * @param {string|null} data.about
+ * @param {string|null} data.website
+ * @param {string|null} data.linkedin_url
+ */
+export async function updateCompanyEnrichment(companyId, data) {
+  const update = { enriched_at: new Date().toISOString() }
+
+  // Only include fields that actually have values — don't overwrite good data
+  // with null if a particular source returned nothing
+  if (data.logo_url    !== undefined) update.logo_url    = data.logo_url
+  if (data.about       !== undefined) update.about       = data.about
+  if (data.website     !== undefined) update.website     = data.website
+  if (data.linkedin_url !== undefined) update.linkedin_url = data.linkedin_url
+
+  const { error } = await supabase
+    .from('companies')
+    .update(update)
+    .eq('id', companyId)
+
+  if (error) {
+    console.error(`  ✗ Enrichment update failed [${companyId}]:`, error.message)
+  }
+}
+
 // ─── LOG RUN ───────────────────────────────────────────────────────────────────
 export async function logRun(source, jobsCount, status) {
   console.log(`
