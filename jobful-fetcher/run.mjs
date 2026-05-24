@@ -16,6 +16,8 @@ const scraper = require('../jobful-api-master/customModules/freejobalerts/scrape
 const stateCodes = require('../jobful-api-master/data/freeJobAlertStateMap.json')
 
 import { upsertCompany, upsertJobs, expireOldJobs, logRun } from '../shared/supabase.mjs'
+import { parseExperience, inferExperienceLevel } from '../shared/experience.mjs'
+import { parseSalary } from '../shared/salary.mjs'
 
 const ALL_INDIA_CATEGORIES = [
   { name: 'Banking', url: 'https://www.freejobalert.com/bank-jobs/', tableNo: 1 },
@@ -231,6 +233,10 @@ async function main() {
         await delay(200)
       }
 
+      const parsedExp = parseExperience(j.postName, description)
+      const expLevel = inferExperienceLevel(j.postName, description, parsedExp)
+      const parsedSalary = parseSalary(j.postName, description)
+
       mappedJobs.push({
         company_id: null,
         external_id: externalId,
@@ -242,6 +248,12 @@ async function main() {
         ats_provider: 'freejobalert',
         job_type: 'fulltime',
         department: j.qualification || null,
+        experience: parsedExp,
+        experience_level: expLevel,
+        salary_min: parsedSalary.salary_min,
+        salary_max: parsedSalary.salary_max,
+        salary_currency: parsedSalary.salary_currency,
+        salary_avg: parsedSalary.salary_avg,
         posted_at: parseDate(j.postDate),
         fetched_at: new Date().toISOString(),
         is_active: true,

@@ -8,6 +8,8 @@
 
 import { readFileSync } from 'fs'
 import { upsertCompany, upsertJobs, cleanupMissingJobs, expireOldJobs, logRun } from '../shared/supabase.mjs'
+import { parseExperience, inferExperienceLevel } from '../shared/experience.mjs'
+import { parseSalary } from '../shared/salary.mjs'
 
 // ─── ATS FETCH HELPERS ────────────────────────────────────────────────────────
 
@@ -286,6 +288,22 @@ async function main() {
         processed++
         continue
       }
+
+      // ── Parse Experience, Level & Salary ─────────────────────────────────
+      jobs = jobs.map(j => {
+        const parsedExp = parseExperience(j.title, j.description)
+        const expLevel = inferExperienceLevel(j.title, j.description, parsedExp)
+        const parsedSalary = parseSalary(j.title, j.description)
+        return {
+          ...j,
+          experience: parsedExp,
+          experience_level: expLevel,
+          salary_min: parsedSalary.salary_min,
+          salary_max: parsedSalary.salary_max,
+          salary_currency: parsedSalary.salary_currency,
+          salary_avg: parsedSalary.salary_avg
+        }
+      })
 
       const slug = company.name
         .toLowerCase()

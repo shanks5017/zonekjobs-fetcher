@@ -16,6 +16,8 @@ import { execFile } from 'child_process'
 import { promisify } from 'util'
 import * as cheerio from 'cheerio'
 import { upsertCompany, upsertJobs, cleanupMissingJobs, expireOldJobs, logRun } from '../shared/supabase.mjs'
+import { parseExperience, inferExperienceLevel } from '../shared/experience.mjs'
+import { parseSalary } from '../shared/salary.mjs'
 
 const execFileAsync = promisify(execFile)
 const __filename = fileURLToPath(import.meta.url)
@@ -67,16 +69,6 @@ function normalizeJobType(employment_type, title, commitment) {
   if (et === 'CONTRACT'  || t.includes('contract')  || c.includes('contract'))  return 'contract'
   if (et === 'TEMPORARY' || t.includes('temporary'))                             return 'contract'
   return 'fulltime'
-}
-
-// ─── EXPERIENCE LEVEL INFERRER ────────────────────────────────────────────────
-function inferExperienceLevel(title, description) {
-  const text = ((title || '') + ' ' + (description || '')).toLowerCase()
-  if (text.includes('vp ') || text.includes('vice president') || text.includes('director') || text.includes('chief')) return 'executive'
-  if (text.includes('senior') || text.includes('staff ') || text.includes('principal') || text.includes('lead ')) return 'senior'
-  if (text.includes('junior') || text.includes('entry') || text.includes('associate') || text.includes('intern')) return 'entry'
-  if (text.includes('manager') || text.includes('mid-level') || text.includes('mid level')) return 'mid'
-  return null
 }
 
 // ─── INDIA / REMOTE JOB FILTER ────────────────────────────────────────────────
@@ -131,6 +123,14 @@ async function fetchJobhive(ats, token) {
 
       // Truncate description to 8 KB and strip HTML tags
       const description = cleanDescription(job.description)
+      const parsedExp = parseExperience(job.title, job.description)
+      const expLevel = inferExperienceLevel(job.title, job.description, parsedExp)
+      const parsedSalary = parseSalary(job.title, job.description)
+
+      const salaryMin = job.salary_min ?? parsedSalary.salary_min ?? null
+      const salaryMax = job.salary_max ?? parsedSalary.salary_max ?? null
+      const salaryCurrency = job.salary_currency ?? parsedSalary.salary_currency ?? null
+      const salaryAvg = (salaryMin && salaryMax) ? Math.round((salaryMin + salaryMax) / 2) : null
 
       return {
         // ── Identity ────────────────────────────────────────────────────────
@@ -147,13 +147,15 @@ async function fetchJobhive(ats, token) {
 
         // ── Classification ──────────────────────────────────────────────────
         job_type:         normalizeJobType(job.employment_type, job.title, job.commitment),
-        experience_level: inferExperienceLevel(job.title, job.description),
+        experience:       parsedExp,
+        experience_level: expLevel,
         department:       job.department || null,
 
         // ── Compensation ────────────────────────────────────────────────────
-        salary_min:       job.salary_min      ?? null,
-        salary_max:       job.salary_max      ?? null,
-        salary_currency:  job.salary_currency ?? null,
+        salary_min:       salaryMin,
+        salary_max:       salaryMax,
+        salary_currency:  salaryCurrency,
+        salary_avg:       salaryAvg,
 
         // ── Timing ──────────────────────────────────────────────────────────
         posted_at:        job.posted_at

@@ -24,6 +24,8 @@ import { execFile } from 'child_process'
 import { promisify } from 'util'
 import * as cheerio from 'cheerio'
 import { upsertCompany, upsertJobs, cleanupMissingJobs, expireOldJobs, logRun } from '../shared/supabase.mjs'
+import { parseExperience, inferExperienceLevel } from '../shared/experience.mjs'
+import { parseSalary } from '../shared/salary.mjs'
 
 const execFileAsync = promisify(execFile)
 
@@ -146,34 +148,37 @@ function normalizeJobType(employment_type, title, commitment) {
   return 'fulltime'
 }
 
-function inferExperienceLevel(title) {
-  const t = (title || '').toLowerCase()
-  if (t.includes('director') || t.includes('vp ') || t.includes('chief'))     return 'executive'
-  if (t.includes('senior') || t.includes('staff ') || t.includes('principal')) return 'senior'
-  if (t.includes('junior') || t.includes('intern') || t.includes('associate')) return 'entry'
-  if (t.includes('manager') || t.includes('lead '))                            return 'mid'
-  return null
-}
-
 function mapJobs(rawJobs) {
   return rawJobs.map(job => {
     const loc = job.location || null
     const t   = (job.title || '').toLowerCase()
+    const desc = cleanDescription(job.description)
+    const parsedExp = parseExperience(job.title, desc)
+    const expLevel = inferExperienceLevel(job.title, desc, parsedExp)
+    const parsedSalary = parseSalary(job.title, desc)
+
+    const salaryMin = job.salary_min ?? parsedSalary.salary_min ?? null
+    const salaryMax = job.salary_max ?? parsedSalary.salary_max ?? null
+    const salaryCurrency = job.salary_currency ?? parsedSalary.salary_currency ?? null
+    const salaryAvg = (salaryMin && salaryMax) ? Math.round((salaryMin + salaryMax) / 2) : null
+
     return {
       external_id:      String(job.ats_id || job.global_id),
       ats_provider:     job.ats_type,
       apply_url:        String(job.apply_url || job.url || ''),
       title:            job.title,
-      description:      cleanDescription(job.description),
+      description:      desc,
       location:         loc,
       country:          job.country_iso || null,
       is_remote:        job.is_remote ?? (t.includes('remote') || (loc || '').toLowerCase().includes('remote')),
       job_type:         normalizeJobType(job.employment_type, job.title, job.commitment),
-      experience_level: inferExperienceLevel(job.title),
+      experience:       parsedExp,
+      experience_level: expLevel,
       department:       job.department || null,
-      salary_min:       job.salary_min      ?? null,
-      salary_max:       job.salary_max      ?? null,
-      salary_currency:  job.salary_currency ?? null,
+      salary_min:       salaryMin,
+      salary_max:       salaryMax,
+      salary_currency:  salaryCurrency,
+      salary_avg:       salaryAvg,
       posted_at:        job.posted_at ? new Date(job.posted_at).toISOString() : null,
       fetched_at:       new Date().toISOString(),
       is_active:        true,
