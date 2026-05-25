@@ -184,6 +184,7 @@ export async function upsertCompany(company) {
         ats_token: company.atsToken || null,
         ats_url: company.atsUrl || null,
         logo_url,
+        linkedin_url: company.linkedin_url || company.linkedinUrl || null,
         source: company.source,
         updated_at: new Date().toISOString()
       },

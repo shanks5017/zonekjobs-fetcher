@@ -63,6 +63,81 @@ function cleanLogoUrl(urlStr, provider) {
   }
 }
 
+function cleanLinkedInUrl(urlStr) {
+  if (!urlStr) return null
+  try {
+    const cleaned = urlStr.trim()
+    const url = new URL(cleaned.startsWith('http') ? cleaned : `https://${cleaned}`)
+    if (url.hostname.includes('linkedin.com') && (url.pathname.includes('/company/') || url.pathname.includes('/school/'))) {
+      url.search = ''
+      url.hash = ''
+      return url.toString().replace(/\/$/, '')
+    }
+  } catch {}
+  return null
+}
+
+async function checkLinkedInSlug(slug) {
+  if (!slug) return null
+  const url = `https://www.linkedin.com/company/${slug}`
+  try {
+    const res = await fetch(url, {
+      method: 'HEAD',
+      headers: {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
+      }
+    })
+    // 200 = OK, 999 = LinkedIn rate limit (meaning it exists but blocked scrapers)
+    if (res.status === 200 || res.status === 999) return url
+    return null
+  } catch {
+    return null
+  }
+}
+
+function generateLinkedInSlugCandidates(name) {
+  const candidates = new Set()
+  const clean = name
+    .replace(/\b(private|pvt|ltd|limited|inc|llc|llp|corp|corporation|technologies|technology|solutions|services|group|holdings|international)\b\.?/gi, '')
+    .trim()
+
+  const fullSlug = name
+    .toLowerCase()
+    .replace(/[&+]/g, '-and-')
+    .replace(/[^a-z0-9\s-]/g, '')
+    .trim()
+    .replace(/\s+/g, '-')
+    .replace(/-+/g, '-')
+    .replace(/^-|-$/g, '')
+
+  const cleanSlug = clean
+    .toLowerCase()
+    .replace(/[&+]/g, '-and-')
+    .replace(/[^a-z0-9\s-]/g, '')
+    .trim()
+    .replace(/\s+/g, '-')
+    .replace(/-+/g, '-')
+    .replace(/^-|-$/g, '')
+
+  const firstWord = cleanSlug.split('-')[0]
+
+  if (fullSlug)  candidates.add(fullSlug)
+  if (cleanSlug) candidates.add(cleanSlug)
+  if (firstWord && firstWord.length > 2) candidates.add(firstWord)
+
+  return [...candidates]
+}
+
+function slugFromDomain(domain) {
+  if (!domain) return null
+  try {
+    const parts = domain.replace(/^www\./, '').split('.')
+    return parts[0] || null
+  } catch {
+    return null
+  }
+}
+
 async function isValidImage(url) {
   if (!url) return false
   try {
@@ -76,7 +151,6 @@ async function isValidImage(url) {
     const contentType = (res.headers.get('content-type') || '').toLowerCase()
     if (contentType.startsWith('image/')) return true
 
-    // Check if the URL has an image extension and content type is octet-stream or pdf (common S3 / Ashby misconfigs)
     const cleanUrl = url.split('?')[0].split('#')[0].toLowerCase()
     const isImageExt = cleanUrl.endsWith('.png') || 
                        cleanUrl.endsWith('.jpg') || 
@@ -111,6 +185,17 @@ async function scrapeCheerio(url, provider) {
 
     let logo_url = null
     let website = null
+    let linkedin_url = null
+
+    // Scan for LinkedIn link
+    $('a').each((i, el) => {
+      const href = $(el).attr('href')
+      const cleanLi = cleanLinkedInUrl(href)
+      if (cleanLi) {
+        linkedin_url = cleanLi
+        return false // break
+      }
+    })
 
     if (provider === 'greenhouse') {
       const logoImg = $('#logo img')
@@ -150,7 +235,7 @@ async function scrapeCheerio(url, provider) {
       })
     }
 
-    return (logo_url || website) ? { logo_url, website } : null
+    return { logo_url, website, linkedin_url }
   } catch (err) {
     console.error(`  ⚠️ [Cheerio] Scrape failed for ${url}:`, err.message)
     return null
@@ -172,9 +257,13 @@ async function scrapePlaywright(url, provider) {
     const data = await page.evaluate((prov) => {
       let logo = null
       let web = null
+      let linkedin = null
 
       const images = Array.from(document.querySelectorAll('img'))
       const links = Array.from(document.querySelectorAll('a'))
+
+      const liLink = links.find(a => a.href.includes('linkedin.com/company/') || a.href.includes('linkedin.com/school/'))
+      if (liLink) linkedin = liLink.href
 
       if (prov === 'greenhouse') {
         const logoImg = document.querySelector('#logo img')
@@ -211,14 +300,15 @@ async function scrapePlaywright(url, provider) {
         if (webLink) web = webLink.href
       }
 
-      return { logo, web }
+      return { logo, web, linkedin }
     }, provider)
 
     await browser.close()
 
     return {
       logo_url: cleanLogoUrl(data.logo, provider),
-      website: cleanWebsiteUrl(data.web)
+      website: cleanWebsiteUrl(data.web),
+      linkedin_url: cleanLinkedInUrl(data.linkedin)
     }
   } catch (err) {
     console.error(`  ⚠️ [Playwright] Scrape failed for ${url}:`, err.message)
@@ -228,7 +318,7 @@ async function scrapePlaywright(url, provider) {
 }
 
 // ─── CLEARBIT / WATERFALL FALLBACK ───────────────────────────────────────────
-async function fallbackEnrich(companyName) {
+async function fallbackEnrich(companyName, domain) {
   try {
     const cleanName = companyName
       .toLowerCase()
@@ -238,7 +328,7 @@ async function fallbackEnrich(companyName) {
 
     if (!cleanName) return null
 
-    const guessedDomain = `${cleanName}.com`
+    const guessedDomain = domain || `${cleanName}.com`
     let logo_url = `https://logo.clearbit.com/${guessedDomain}`
     let website = `https://${guessedDomain}`
 
@@ -256,11 +346,26 @@ async function fallbackEnrich(companyName) {
 
     const validImg = await isValidImage(logo_url)
     if (!validImg) {
-      const domain = new URL(website).hostname
-      logo_url = `https://www.google.com/s2/favicons?sz=128&domain=${domain}`
+      const domainVal = new URL(website).hostname
+      logo_url = `https://www.google.com/s2/favicons?sz=128&domain=${domainVal}`
     }
 
-    return { logo_url, website }
+    // Resolve LinkedIn Waterfall (guess + check)
+    let linkedin_url = null
+    const domainSlug = slugFromDomain(guessedDomain)
+    if (domainSlug) {
+      linkedin_url = await checkLinkedInSlug(domainSlug)
+    }
+    if (!linkedin_url) {
+      const candidates = generateLinkedInSlugCandidates(companyName)
+      for (const slug of candidates) {
+        if (slug === domainSlug) continue
+        linkedin_url = await checkLinkedInSlug(slug)
+        if (linkedin_url) break
+      }
+    }
+
+    return { logo_url, website, linkedin_url }
   } catch (err) {
     console.error('  ⚠️ [Fallback] Enrich failed:', err.message)
     return null
@@ -294,7 +399,8 @@ export async function getCompanyMetadata(companyName, provider, urlOrToken) {
     if (pwResult) {
       result = {
         logo_url: pwResult.logo_url || result?.logo_url || null,
-        website: pwResult.website || result?.website || null
+        website: pwResult.website || result?.website || null,
+        linkedin_url: pwResult.linkedin_url || result?.linkedin_url || null
       }
     }
   }
@@ -307,13 +413,22 @@ export async function getCompanyMetadata(companyName, provider, urlOrToken) {
     }
   }
 
+  // Extract domain to help with LinkedIn resolution fallback
+  const resolvedDomain = (() => {
+    if (result?.website) {
+      try { return new URL(result.website).hostname } catch {}
+    }
+    return null
+  })()
+
   // 3. Last-resort fallback to Clearbit / Name resolution
-  if (!result || !result.logo_url || !result.website) {
-    const fbResult = await fallbackEnrich(companyName)
+  if (!result || !result.logo_url || !result.website || !result.linkedin_url) {
+    const fbResult = await fallbackEnrich(companyName, resolvedDomain)
     if (fbResult) {
       result = {
         logo_url: result?.logo_url || fbResult.logo_url || null,
-        website: result?.website || fbResult.website || null
+        website: result?.website || fbResult.website || null,
+        linkedin_url: result?.linkedin_url || fbResult.linkedin_url || null
       }
     }
   }

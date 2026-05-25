@@ -383,7 +383,7 @@ async function main() {
         }
 
         const slug = name.toLowerCase().replace(/[^a-z0-9]/g, '-').replace(/-+/g, '-').replace(/^-|-$/g, '')
-        console.log(`  🔍 Fetching logo/website for ${name}...`)
+        console.log(`  🔍 Fetching logo/website/linkedin for ${name}...`)
         const enrichedMeta = await getCompanyMetadata(name, ats, token)
 
         const companyId = await upsertCompany({
@@ -391,6 +391,7 @@ async function main() {
           slug,
           website:     enrichedMeta?.website || (row.url?.startsWith('http') ? row.url : null),
           logo_url:    enrichedMeta?.logo_url || null,
+          linkedin_url: enrichedMeta?.linkedin_url || null,
           industry:    null,
           country:     null,
           atsProvider: ats,

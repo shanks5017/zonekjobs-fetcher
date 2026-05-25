@@ -291,7 +291,7 @@ async function main() {
         continue
       }
 
-      console.log(`  🔍 Fetching logo/website for ${company.name}...`)
+      console.log(`  🔍 Fetching logo/website/linkedin for ${company.name}...`)
       const enrichedMeta = await getCompanyMetadata(company.name, company.atsProvider, company.atsToken)
 
       const companyPayload = {
@@ -299,6 +299,7 @@ async function main() {
         slug,
         website:     enrichedMeta?.website || company.website || null,
         logo_url:    enrichedMeta?.logo_url || null,
+        linkedin_url: enrichedMeta?.linkedin_url || null,
         industry:    company.industry || null,
         country:     company.country || 'Global',
         atsProvider: company.atsProvider,
