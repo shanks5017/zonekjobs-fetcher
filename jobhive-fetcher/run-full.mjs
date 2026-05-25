@@ -26,6 +26,7 @@ import * as cheerio from 'cheerio'
 import { upsertCompany, upsertJobs, cleanupMissingJobs, expireOldJobs, logRun } from '../shared/supabase.mjs'
 import { parseExperience, inferExperienceLevel } from '../shared/experience.mjs'
 import { parseSalary } from '../shared/salary.mjs'
+import { getCompanyMetadata } from '../shared/enricher.mjs'
 
 const execFileAsync = promisify(execFile)
 
@@ -382,10 +383,14 @@ async function main() {
         }
 
         const slug = name.toLowerCase().replace(/[^a-z0-9]/g, '-').replace(/-+/g, '-').replace(/^-|-$/g, '')
+        console.log(`  🔍 Fetching logo/website for ${name}...`)
+        const enrichedMeta = await getCompanyMetadata(name, ats, token)
+
         const companyId = await upsertCompany({
           name,
           slug,
-          website:     row.url?.startsWith('http') ? row.url : null,
+          website:     enrichedMeta?.website || (row.url?.startsWith('http') ? row.url : null),
+          logo_url:    enrichedMeta?.logo_url || null,
           industry:    null,
           country:     null,
           atsProvider: ats,

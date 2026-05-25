@@ -17,7 +17,7 @@ export async function upsertCompany(company) {
     .replace(/-+/g, '-')
     .replace(/^-|-$/g, '')
 
-  let logo_url = null
+  let logo_url = company.logo_url || company.logoUrl || null
   let resolvedDomain = null
 
   const ATS_DOMAINS = [
@@ -148,9 +148,26 @@ export async function upsertCompany(company) {
     resolvedDomain = `${cleanName}.com`
   }
 
-  if (resolvedDomain) {
-    // For Google's Favicon API, keeping the full subdomain is better.
-    // However, if we don't have an override and it was a custom website, we can use it.
+  // Final clean website check to ensure no ATS domains ever persist in Supabase
+  let website = company.website || null
+  if (website) {
+    try {
+      const urlStr = website.startsWith('http') ? website : `https://${website}`
+      const url = new URL(urlStr)
+      const isAts = ATS_DOMAINS.some(d => url.hostname.toLowerCase().includes(d))
+      if (isAts) {
+        website = resolvedDomain ? `https://${resolvedDomain}` : null
+      } else {
+        website = urlStr
+      }
+    } catch {
+      website = resolvedDomain ? `https://${resolvedDomain}` : null
+    }
+  } else if (resolvedDomain) {
+    website = `https://${resolvedDomain}`
+  }
+
+  if (!logo_url && resolvedDomain) {
     logo_url = `https://www.google.com/s2/favicons?sz=128&domain=${resolvedDomain.toLowerCase()}`
   }
 
@@ -160,7 +177,7 @@ export async function upsertCompany(company) {
       {
         name: company.name,
         slug,
-        website: company.website || null,
+        website,
         industry: company.industry || null,
         country: company.country || 'India',
         ats_provider: company.atsProvider,

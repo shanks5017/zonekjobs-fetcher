@@ -18,6 +18,7 @@ import * as cheerio from 'cheerio'
 import { upsertCompany, upsertJobs, cleanupMissingJobs, expireOldJobs, logRun } from '../shared/supabase.mjs'
 import { parseExperience, inferExperienceLevel } from '../shared/experience.mjs'
 import { parseSalary } from '../shared/salary.mjs'
+import { getCompanyMetadata } from '../shared/enricher.mjs'
 
 const execFileAsync = promisify(execFile)
 const __filename = fileURLToPath(import.meta.url)
@@ -284,10 +285,20 @@ async function main() {
         .replace(/-+/g, '-')
         .replace(/^-|-$/g, '')
 
+      if (!jobs.length) {
+        console.log(`  ⚠  No jobs — skipping company creation`)
+        skipped++
+        continue
+      }
+
+      console.log(`  🔍 Fetching logo/website for ${company.name}...`)
+      const enrichedMeta = await getCompanyMetadata(company.name, company.atsProvider, company.atsToken)
+
       const companyPayload = {
         name:        company.name,
         slug,
-        website:     company.website || null,
+        website:     enrichedMeta?.website || company.website || null,
+        logo_url:    enrichedMeta?.logo_url || null,
         industry:    company.industry || null,
         country:     company.country || 'Global',
         atsProvider: company.atsProvider,
@@ -296,13 +307,6 @@ async function main() {
         source:      'jobhive',
       }
 
-      if (!jobs.length) {
-        console.log(`  ⚠  No jobs — skipping company creation`)
-        skipped++
-        continue
-      }
-
-      // Logo is resolved inside upsertCompany via Clearbit
       const companyId = await upsertCompany(companyPayload)
       if (!companyId) { skipped++; continue }
 

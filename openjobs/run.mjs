@@ -10,6 +10,7 @@ import { readFileSync } from 'fs'
 import { upsertCompany, upsertJobs, cleanupMissingJobs, expireOldJobs, logRun } from '../shared/supabase.mjs'
 import { parseExperience, inferExperienceLevel } from '../shared/experience.mjs'
 import { parseSalary } from '../shared/salary.mjs'
+import { getCompanyMetadata } from '../shared/enricher.mjs'
 
 // ─── ATS FETCH HELPERS ────────────────────────────────────────────────────────
 
@@ -311,10 +312,14 @@ async function main() {
         .replace(/-+/g, '-')
         .replace(/^-|-$/g, '')
 
+      console.log(`  🔍 Fetching logo/website for ${company.name}...`)
+      const enrichedMeta = await getCompanyMetadata(company.name, provider, token || url)
+
       const companyId = await upsertCompany({
         name: company.name,
         slug,
-        website: company.website || null,
+        website: enrichedMeta?.website || company.website || null,
+        logo_url: enrichedMeta?.logo_url || null,
         industry: company.industry_category || company.industry || null,
         country: countryVal,
         atsProvider: provider,
